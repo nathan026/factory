@@ -8,7 +8,7 @@ const source = `
   import { createRoot } from "react-dom/client";
   import { GitHubIssueForm } from "./issue-picker";
   const item = {number:7,id:17,title:"Reduce scrolling",canReview:true};
-  const preview = {issueId:17, title:item.title, body:"- Show a spinner\\n- [ ] Keep the latest message visible",
+  const preview = {issueId:17, title:item.title, body:"- Show a spinner\\n  while a worker runs\\n- [ ] Keep the latest message visible",
     assigned:false, canBegin:false, paths:[], checks:[], saved:null};
   const api = async (route, options) => {
     if (route.startsWith("github/issues?")) return {items:[item]};
@@ -29,7 +29,7 @@ try {
   await page.addScriptTag({content:bundle.outputFiles[0].text});
   await page.getByRole("button",{name:"Review scope"}).click();
   assert.equal(await page.getByLabel("Work to complete").inputValue(), "Reduce scrolling");
-  assert.equal(await page.getByLabel("What should work").inputValue(), "Show a spinner\nKeep the latest message visible");
+  assert.equal(await page.getByLabel("What should work").inputValue(), "Show a spinner while a worker runs\nKeep the latest message visible");
   assert.doesNotMatch(await page.locator("body").innerText(), /racing palette|installed project policy/i);
   await page.getByRole("button",{name:"Save checklist"}).click();
   await page.getByRole("heading",{name:"Saved checklist for issue #7"}).waitFor();

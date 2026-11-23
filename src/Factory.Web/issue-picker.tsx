@@ -55,22 +55,36 @@ export function GitHubIssueForm({api,ready,created,cancel,intake,goal}: Props) {
   </section>;
 }
 
-function issueChecklist(body: string | null): string[] {
-  const checks: string[] = [];
-  let inFence = "";
+function issueChecklist(body: string | null) {
+  const items: string[] = [];
+  let current = "";
+  let fence = "";
+  function finish() {
+    if (current && !items.includes(current)) items.push(current);
+    current = "";
+  }
   for (const line of (body ?? "").split(/\r?\n/)) {
-    const fence = line.trimStart().match(/^(`{3,}|~{3,})/);
-    if (fence) {
-      if (!inFence) inFence = fence[1];
-      else if (fence[1].startsWith(inFence)) inFence = "";
+    const marker = line.trimStart().match(/^(`{3,}|~{3,})/);
+    if (marker) {
+      finish();
+      if (!fence) fence = marker[1];
+      else if (marker[1].startsWith(fence)) fence = "";
       continue;
     }
-    if (inFence) continue;
+    if (fence) continue;
     const item = line.match(/^\s*(?:[-*+]|\d+[.)])\s+(?:\[[ xX]\]\s+)?(.+?)\s*$/);
-    if (item && item[1].length <= 2000 && !checks.includes(item[1])) checks.push(item[1]);
-    if (checks.length === 16) break;
+    if (item) {
+      finish();
+      current = item[1];
+    } else if (current && line.trim()) {
+      current += " " + line.trim();
+    } else {
+      finish();
+    }
   }
-  return checks;
+  finish();
+  const fits = items.length <= 16 && items.every(s => s.length <= 2000);
+  return {items, fits};
 }
 
 function IssueScope({api,ready,item,created}: {api:Api;ready:boolean;item:Item;created:(id:string)=>void}) {
@@ -80,7 +94,7 @@ function IssueScope({api,ready,item,created}: {api:Api;ready:boolean;item:Item;c
   async function load() {
     const p=await api<Preview>(route+"/scope");
     setPreview(p); setGoal(p.saved?.request.goal ?? p.title); setFiles((p.saved?.request.paths ?? []).join("\n"));
-    setTests((p.saved?.request.checks ?? issueChecklist(p.body)).join("\n"));
+    setTests((p.saved?.request.checks ?? issueChecklist(p.body).items).join("\n"));
     return p;
   }
   async function act(action:"review"|"save"|"start") {
@@ -97,14 +111,15 @@ function IssueScope({api,ready,item,created}: {api:Api;ready:boolean;item:Item;c
         created((await api<{taskId:string}>(route+"/start",{body:{repositoryId:preview.repositoryId,
           issueId:preview.issueId,scopeHash:preview.issueHash,scopeApproval:preview.saved.id},timeoutMs:90000})).taskId);
       }
-    } catch(e){setError((e as Error).message);setPreview(null);edit(false);} finally{setBusy(false);}
+    } catch(e){setError((e as Error).message);} finally{setBusy(false);}
   }
   return <section aria-label="Issue work scope">
     {!preview ? <button disabled={!ready||busy} onClick={()=>act("review")}>Review scope</button> :
-      <><details><summary>Original GitHub issue and base revision</summary>
+      <><details open={!issueChecklist(preview.body).fits || undefined}><summary>Original GitHub issue and base revision</summary>
         <div style={{whiteSpace:"pre-wrap"}}>{preview.body}</div><p>Base revision <code>{preview.baseSha}</code></p>
       </details>
       {editing ? <>
+        {!issueChecklist(preview.body).fits && <p>The issue exceeds the checklist limit. Combine its requirements into up to 16 checks of 2,000 characters each before saving.</p>}
         <label>Work to complete<textarea value={goal} onChange={e=>setGoal(e.target.value)} maxLength={2000}/></label>
         <label>What should work when issue #{item.number} is done? Enter one check per line.
           <textarea rows={6} value={tests} onChange={e=>setTests(e.target.value)}/></label>
@@ -125,6 +140,6 @@ function IssueScope({api,ready,item,created}: {api:Api;ready:boolean;item:Item;c
         {preview.canBegin && <button disabled={!ready||busy} onClick={()=>act("start")}>Begin</button>}
         <button className="secondary" disabled={busy} onClick={()=>edit(true)}>Edit scope</button>
       </>}</>}
-    {error && <p role="alert">{error}</p>}
+    {error && <><p role="alert">{error}</p>{preview && <button className="secondary" disabled={busy} onClick={()=>act("review")}>Reload saved scope</button>}</>}
   </section>;
 }
