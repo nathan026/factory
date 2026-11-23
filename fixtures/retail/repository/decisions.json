@@ -1,0 +1,8 @@
+[
+  {
+    "id": "RETAIL-01",
+    "subject": "standard-threshold",
+    "text": "Orders at 5000 cents qualify for retail shipping.",
+    "value": "5000"
+  }
+]

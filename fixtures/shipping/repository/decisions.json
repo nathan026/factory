@@ -1,0 +1,8 @@
+[
+  {
+    "id":"SHIP-01",
+    "subject":"standard-threshold",
+    "text":"Keep the free shipping threshold at 5000 cents. Orders at the threshold qualify.",
+    "value":"5000"
+  }
+]

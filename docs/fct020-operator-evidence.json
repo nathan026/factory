@@ -1,0 +1,9 @@
+{
+  "evidenceClass": "synthetic renderer fixture",
+  "cases": [
+    "preserve legacy output when repairs is absent",
+    "render zero repairs",
+    "render positive repair counts"
+  ],
+  "operatorApproval": null
+}

@@ -1,0 +1,26 @@
+{
+  "policy": {
+    "version": "retail/v1",
+    "requiredChecks": [
+      "order-offset/-1",
+      "order-offset/0",
+      "order-offset/1"
+    ],
+    "maxRepairs": 1
+  },
+  "goal": "Correct the free shipping boundary for retail orders.",
+  "environment": "node:22-bookworm-slim@sha256:e9f565d32859f0cbfb52125eafe8be39390f24dac302dc3cdf566e8ba3ab21ee",
+  "script": "verify.cjs",
+  "scriptHash": "dedb83bff1c3bc885aff82e1a17ae6653cac035b1f5c45000bc763dd4029f92d",
+  "requiredRoles": [
+    "Planner",
+    "Implementer",
+    "Verifier",
+    "Reviewer"
+  ],
+  "publication": "reviewed-draft",
+  "promotion": "human",
+  "settings": {
+    "proposedThreshold": 4000
+  }
+}

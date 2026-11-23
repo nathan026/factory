@@ -1,0 +1,19 @@
+{
+  "version": "factory-source/v1",
+  "repository": "fixture/factory",
+  "repositoryId": 723,
+  "issue": 1,
+  "issueId": 1001,
+  "base": "d3cda45a69904aa34b07771a43044dabe4c81214",
+  "path": "scripts/task-summary.cjs",
+  "title": "Render retained task evidence as Markdown",
+  "body": "Add an offline command to summarize task activity, decision count and every verification receipt, including failures.",
+  "requiredChecks": [
+    "retained-export",
+    "mixed-receipts",
+    "unverified-input"
+  ],
+  "publication": "reviewed-draft",
+  "promotion": "human",
+  "rollback": "previous-reviewed-release"
+}
