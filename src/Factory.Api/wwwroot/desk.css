@@ -3,8 +3,9 @@
     16px/1.5 "Segoe UI",
     system-ui,
     sans-serif;
-  color: #1d312a;
-  background: #f4f6f1;
+  color: #f5f3f0;
+  background: #121316;
+  color-scheme: dark;
   font-synthesis: none;
 }
 * {
@@ -12,6 +13,9 @@
 }
 body {
   margin: 0;
+}
+a {
+  color: #ffaf65;
 }
 h1,
 h2,
@@ -33,7 +37,7 @@ h4 {
 h1 {
   font-size: clamp(1.8rem, 3.5vw, 2.7rem);
   letter-spacing: -0.045em;
-  font-weight: 650;
+  font-weight: 800;
 }
 h2 {
   font-size: 1.35rem;
@@ -46,7 +50,7 @@ h3 {
 small,
 .muted,
 dt {
-  color: #52665b;
+  color: #b9bcc5;
   font-size: 0.83rem;
 }
 code,
@@ -66,26 +70,30 @@ button {
   border: 1px solid transparent;
   border-radius: 6px;
   padding: 0.55rem 0.95rem;
-  background: #E86100;
-  color: #000;
+  background: #ff8700;
+  color: #16110c;
   font-weight: 600;
   cursor: pointer;
 }
 button:hover:enabled {
-  filter: brightness(0.93);
+  border-color: #ffaf65;
+}
+button:hover:enabled:not(:where(.secondary, .link-btn, .queue-task, .filters button, .tabs button)) {
+  background: #ffad57;
+  color: #16110c;
 }
 button:disabled {
   opacity: 0.5;
   cursor: default;
 }
 :focus-visible {
-  outline: 3px solid #3c805c;
+  outline: 3px solid #ffd29f;
   outline-offset: 3px;
 }
 .secondary {
-  border: 1px solid #b5c3b9;
-  background: #fff;
-  color: #254a38;
+  border: 1px solid #626675;
+  background: #23252b;
+  color: #f5f3f0;
 }
 label {
   display: block;
@@ -98,11 +106,11 @@ select {
   display: block;
   width: 100%;
   margin-top: 0.35rem;
-  border: 1px solid #a4b7a9;
-  background: white;
+  border: 1px solid #646879;
+  background: #23252b;
   border-radius: 6px;
   padding: 0.65rem 0.75rem;
-  color: #1d312a;
+  color: #f5f3f0;
 }
 textarea {
   resize: vertical;
@@ -110,8 +118,9 @@ textarea {
 }
 .top {
   height: 64px;
-  background: #183c2c;
-  color: #eff9ef;
+  border-bottom: 3px solid #ff8700;
+  background: #191a1f;
+  color: #f5f3f0;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -134,28 +143,29 @@ textarea {
   gap: 0.65rem;
 }
 .brand {
-  font-weight: 700;
+  font-weight: 800;
   font-size: 1.12rem;
-  letter-spacing: -0.025em;
+  letter-spacing: 0.025em;
   white-space: nowrap;
 }
 .brand > span:last-child {
   font-weight: 450;
-  color: #e0ece2;
+  color: #d7d9e0;
 }
 .brand-divider {
-  color: #96b89e;
+  color: #ff8700;
 }
 .mark {
   align-items: flex-end;
   gap: 2px;
   height: 20px;
-  margin-right: 0.15rem;
+  margin-right: 0.25rem;
+  transform: skewX(-16deg);
 }
 .mark i {
   display: block;
   width: 5px;
-  background: #E86100;
+  background: #ff8700;
   border-radius: 1px;
 }
 .mark i:nth-child(1) {
@@ -169,7 +179,7 @@ textarea {
 }
 .connection {
   font-size: 0.81rem;
-  color: #dfecdd;
+  color: #d7d9e0;
   gap: 0.4rem;
 }
 .connection i,
@@ -189,9 +199,9 @@ textarea {
   color: #f4c57c;
 }
 .link-btn {
-  color: #fff;
+  color: #f5f3f0;
   background: transparent;
-  border-color: #648171;
+  border-color: #626675;
   padding: 0.35rem 0.65rem;
   font-size: 0.83rem;
 }
@@ -203,20 +213,25 @@ textarea {
   margin: auto;
 }
 .queue {
-  background: #eaf0e8;
-  border-right: 1px solid #cbd7cb;
+  background: #1b1c21;
+  border-right: 1px solid #383a44;
   padding: 1.8rem clamp(0.85rem, 2vw, 1.65rem);
 }
 .queue-head {
   justify-content: space-between;
   margin-bottom: 1rem;
 }
+.queue-head h2 {
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
 .new-task {
   width: 100%;
   text-align: center;
 }
 .filters {
-  border-bottom: 1px solid #c5d1c6;
+  border-bottom: 1px solid #383a44;
   margin: 1.25rem 0 0.75rem;
   gap: 0.75rem;
 }
@@ -225,21 +240,21 @@ textarea {
   border: 0;
   border-bottom: 2px solid transparent;
   background: transparent;
-  color: #52665b;
+  color: #b9bcc5;
   border-radius: 0;
   padding: 0.58rem 0.05rem;
   font-size: 0.88rem;
 }
 .filters [aria-pressed="true"],
 .tabs [aria-current] {
-  border-color: #236b4c;
-  color: #184c35;
+  border-color: #ff8700;
+  color: #ffaf65;
 }
 .filters b {
   font-size: 0.72rem;
   padding: 1px 5px;
   border-radius: 4px;
-  background: #d8e4d9;
+  background: #32343e;
   margin-left: 0.15rem;
 }
 .task-list,
@@ -258,20 +273,20 @@ textarea {
   text-align: left;
   background: transparent;
   color: inherit;
-  border-color: #ced9cd;
+  border-color: #41434d;
   font-weight: 400;
 }
 .queue-task[aria-pressed="true"] {
-  background: #fff;
-  border-color: #80a68e;
-  box-shadow: inset 3px 0 #427b55;
+  background: #23252b;
+  border-color: #c86a21;
+  box-shadow: inset 3px 0 #ff8700;
 }
 .queue-task strong {
   font-size: 0.98rem;
 }
 .row-meta {
   justify-content: space-between;
-  color: #53695a;
+  color: #b9bcc5;
   font-size: 0.77rem;
 }
 .row-meta small {
@@ -279,10 +294,11 @@ textarea {
 }
 .row-note {
   font-size: 0.8rem;
-  color: #594526;
+  color: #ffd29f;
 }
 .workspace {
   min-width: 0;
+  background: #15161b;
   padding: clamp(1.15rem, 4vw, 3.75rem);
 }
 article,
@@ -293,7 +309,7 @@ article,
 }
 .task-heading > p,
 .start > p {
-  color: #52665b;
+  color: #b9bcc5;
   margin-top: 0.55rem;
 }
 .heading-meta {
@@ -304,7 +320,7 @@ article,
 .eyeline {
   font-size: 0.76rem;
   letter-spacing: 0.07em;
-  color: #4e6a58;
+  color: #ffaf65;
 }
 .status {
   display: inline-flex;
@@ -314,21 +330,24 @@ article,
   font-weight: 600;
   border-radius: 4px;
   padding: 0.15rem 0.45rem;
-  background: #dfe8df;
-  color: #34533e;
+  background: #343744;
+  color: #f1f2f6;
 }
 .status.Waiting {
-  color: #704c0b;
-  background: #ffedbf;
+  color: #ffe1a1;
+  background: #49330e;
 }
 .status.Blocked {
-  color: #812e23;
-  background: #fce1dc;
+  color: #ffc5bd;
+  background: #4c2528;
 }
-.status.Delivered,
+.status.Delivered {
+  color: #a1f4c9;
+  background: #143c2e;
+}
 .status.Running {
-  color: #1b6642;
-  background: #d9efdc;
+  color: #c6deff;
+  background: #29374b;
 }
 .facts {
   display: flex;
@@ -347,7 +366,7 @@ article,
   display: flex;
   align-items: baseline;
   gap: 0.8rem;
-  border-block: 1px solid #cad6ca;
+  border-block: 1px solid #383a44;
   padding: 0.65rem 0;
   font-size: 0.93rem;
 }
@@ -357,18 +376,18 @@ article,
 .decision,
 .card,
 .composer {
-  border: 1px solid #c5d3c7;
+  border: 1px solid #41434d;
   border-radius: 10px;
-  background: #fff;
+  background: #23252b;
   padding: clamp(1rem, 2vw, 1.6rem);
 }
 .decision {
-  background: #fff8e6;
-  border-color: #d9c18b;
+  background: #302419;
+  border-color: #986039;
   margin-top: 1.1rem;
 }
 .decision .eyeline {
-  color: #75531c;
+  color: #ffd29f;
 }
 .decision h2 {
   margin: 0.45rem 0 0.65rem;
@@ -386,7 +405,7 @@ article,
   margin-top: 1rem;
 }
 .tabs {
-  border-bottom: 1px solid #c7d4c8;
+  border-bottom: 1px solid #383a44;
   gap: 1.4rem;
   margin: 1.2rem 0;
 }
@@ -418,7 +437,7 @@ article,
   grid-template-columns: 2.15rem minmax(0, 1fr);
   gap: 0.85rem;
   padding: 0.8rem 0;
-  border-bottom: 1px solid #dbe3d8;
+  border-bottom: 1px solid #383a44;
 }
 .avatar {
   width: 2.15rem;
@@ -426,15 +445,15 @@ article,
   display: grid;
   place-items: center;
   border-radius: 6px;
-  background: #e1ece0;
-  color: #346149;
+  background: #45301e;
+  color: #ffd29f;
   font:
     bold 0.72rem Consolas,
     monospace;
 }
 .avatar.operator {
-  background: #dce5ef;
-  color: #36506b;
+  background: #29374b;
+  color: #c6deff;
 }
 .line p {
   white-space: pre-wrap;
@@ -444,8 +463,8 @@ article,
   font-size: 0.86rem;
 }
 .reading {
-  background: white;
-  border: 1px solid #d1dbcf;
+  background: #23252b;
+  border: 1px solid #41434d;
   border-radius: 10px;
   padding: 1.2rem;
 }
@@ -461,23 +480,23 @@ article,
   padding-left: 1.25rem;
 }
 .record {
-  border-left: 3px solid #8baa90;
+  border-left: 3px solid #c86a21;
   padding-left: 0.75rem;
   margin: 0.7rem 0;
 }
 details {
-  border-block-start: 1px solid #dce3d9;
+  border-block-start: 1px solid #383a44;
   padding: 0.55rem 0;
 }
 summary {
   cursor: pointer;
-  color: #294e37;
+  color: #ffaf65;
   font-weight: 600;
 }
 pre {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-  background: #edf2eb;
+  background: #1b1c21;
   padding: 0.75rem;
   border-radius: 5px;
   font-size: 0.83rem;
@@ -503,8 +522,8 @@ pre {
 }
 .banner,
 [role="alert"] {
-  color: #7a3222;
-  background: #fff0df;
+  color: #ffc5bd;
+  background: #4c2528;
   padding: 0.65rem 1rem;
 }
 .banner {
@@ -537,7 +556,7 @@ textarea {
   .queue {
     padding: 0.65rem 1rem;
     border-right: 0;
-    border-bottom: 1px solid #cad6ca;
+    border-bottom: 1px solid #383a44;
   }
   .queue-head {
     margin: 0;
