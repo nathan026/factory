@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { age, Api, Catalog, QueueRow, status, Task, Workspace } from "./types";
+import { age, Api, Catalog, GitHubIntake, QueueRow, status, Task, Workspace } from "./types";
 import { Brief, Conversation, EvidencePanel, ExpertAdvice, RecoverOperation } from "./panels";
 
 import { RestorePanel } from "./restore";
@@ -30,9 +30,8 @@ function App() {
   }, []);
   const api: Api = useCallback(
     async (path, options = {}) => {
-      const signal = options.signal
-        ? AbortSignal.any([options.signal, AbortSignal.timeout(10000)])
-        : AbortSignal.timeout(10000);
+      const timeout = AbortSignal.timeout(options.timeoutMs ?? 10000);
+      const signal = options.signal ? AbortSignal.any([options.signal, timeout]) : timeout;
       const response = await fetch("/api/" + path, {
         method: options.body ? "POST" : "GET",
         signal,
@@ -265,7 +264,7 @@ function Desk({ api, signOut }: { api: Api; signOut: () => void }) {
                 setCommandError("");
               }}
             >
-              + New task
+              {catalog?.githubIntake ? "Start GitHub issue" : "+ New task"}
             </button>
             <div className="filters" aria-label="Queue filter">
               <button aria-pressed={filter === "all"} onClick={() => setFilter("all")}>
@@ -314,7 +313,7 @@ function Desk({ api, signOut }: { api: Api; signOut: () => void }) {
           {isNew && catalog ? (
             <NewTask
               catalog={catalog}
-              ready={connection === "online"}
+              ready={connection === "online" && !catalog.restorePaused}
               api={api}
               cancel={rows.length ? () => setCreating(false) : undefined}
               created={(id) => {
@@ -455,19 +454,67 @@ function Desk({ api, signOut }: { api: Api; signOut: () => void }) {
   );
 }
 
-function NewTask({
+type StartFormProps = {
+  api: Api;
+  ready: boolean;
+  created: (id: string) => void;
+  cancel?: () => void;
+};
+
+function GitHubIssueForm({ intake, goal, api, ready, created, cancel }: StartFormProps & { intake: GitHubIntake; goal: string }) {
+  const [number, select] = useState(intake.issues[0].number);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const issue = intake.issues.find(item => item.number === number)!;
+  async function begin(event: React.FormEvent) {
+    event.preventDefault();
+    if (!ready || busy) return;
+    setBusy(true);
+    setError("");
+    try {
+      const result = await api<{ taskId: string }>(`github/issues/${number}/start`, {
+        body: { repositoryId: intake.repositoryId, issueId: issue.id, scopeHash: issue.scopeHash },
+        timeoutMs: 90000,
+      });
+      created(result.taskId);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <form className="card start" onSubmit={begin}>
+      <h1>Start GitHub issue</h1>
+      <label>Approved issue
+        <select value={number} disabled={busy} onChange={e => select(Number(e.target.value))}>
+          {intake.issues.map(item => <option key={item.id} value={item.number}>{intake.repository}#{item.number}</option>)}
+        </select>
+      </label>
+      <p>{goal}</p>
+      {error && <p role="alert">{error}</p>}
+      <div className="actions">
+        <button disabled={!ready || busy}>{busy ? "Starting…" : "Begin"}</button>
+        {cancel && <button type="button" className="secondary" disabled={busy} onClick={cancel}>Cancel</button>}
+      </div>
+    </form>
+  );
+}
+
+function NewTask(props: StartFormProps & { catalog: Catalog }) {
+  const { catalog } = props;
+  return catalog.githubIntake
+    ? <GitHubIssueForm {...props} intake={catalog.githubIntake} goal={catalog.goal} />
+    : <SampleTaskForm {...props} />;
+}
+
+function SampleTaskForm({
   catalog,
   api,
   ready,
   created,
   cancel,
-}: {
-  catalog: Catalog;
-  api: Api;
-  ready: boolean;
-  created: (id: string) => void;
-  cancel?: () => void;
-}) {
+}: StartFormProps & { catalog: Catalog }) {
   const [scenario, setScenario] = useState(
     () => sessionStorage.getItem("factory-scenario") || catalog.scenarios[0].id,
   );

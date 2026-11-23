@@ -46,6 +46,7 @@ static class HostedGitHubChecks
             manifest["hostedGitHub"] = JsonSerializer.SerializeToNode(hosted, Wire.Json);
             var project = Install();
             var approved = Load(config, project);
+            if (!approved.OperatorStart) throw new Exception("Hosted approval must wait for operator start.");
             foreach (var invalid in new[] {
                 config with { RepositoryId = 124 }, config with { Repository = "other/test" },
                 config with { BaseBranch = "main" }, config with { ApiUrl = "http://127.0.0.1:8080" },

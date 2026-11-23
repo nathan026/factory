@@ -33,9 +33,10 @@ public sealed partial class TaskStore
     }
 
     public GitHubStatus ObserveIssue(long repo, int number, long version, IssueObservation observation,
-        IssueOrigin? origin, SourcePacket? source) => database.Write(s =>
+        IssueOrigin? origin, SourcePacket? source, bool operatorStart = false) => database.Write(s =>
     {
         var prior = IssueStatus(s, repo, number);
+        if (operatorStart && prior.TaskId is not null) return prior;
         if (prior.Version != version) throw new CommandConflict("Concurrent issue poll. Read the current issue again.");
         if (!DateTimeOffset.TryParse(observation.UpdatedAt, out var updated) ||
             (prior.Observation is { } older && updated < DateTimeOffset.Parse(older.UpdatedAt)))
@@ -44,6 +45,7 @@ public sealed partial class TaskStore
         if (taskId is null && origin is not null && source is not null && observation.Reason == "Eligible")
         {
             var task = lifecycle.Start(Guid.NewGuid(), origin.Scenario, observation.Title + "\n\n" + observation.Body, source);
+            if (operatorStart) task.Record("Operator", $"Requested start of {origin.Repository}#{number}.");
             task.Record("Controller", $"Admitted {origin.Repository}#{number} at {origin.BaseSha}.");
             Save(s, task);
             taskId = task.Id;

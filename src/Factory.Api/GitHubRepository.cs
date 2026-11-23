@@ -11,7 +11,7 @@ namespace Factory;
 public record ApprovedIssue(int Number, long Id, string ScopeHash, string Scenario);
 public record HostedGitHubApproval(string BaseBranch, ApprovedIssue Issue);
 public record GitHubProject(string Repository, long RepositoryId, string BaseBranch, ApprovedIssue[] Issues,
-    string ApiUrl = "https://api.github.com", bool LocalAtomicDraft = false)
+    string ApiUrl = "https://api.github.com", bool LocalAtomicDraft = false, bool OperatorStart = false)
 {
     // Set only after the controller verifies the installed policy against its intake file.
     internal ApprovedIssue? HostedIssue { get; private init; }
@@ -45,7 +45,7 @@ public record GitHubProject(string Repository, long RepositoryId, string BaseBra
                     config.Issues is not [var issue] || issue != hosted.Issue ||
                     !Regex.IsMatch(rules.GetProperty("base").GetString() ?? "", @"\A[0-9a-f]{40}\z"))
                     throw new InvalidDataException("Hosted factory destination or issue differs from the installed approval.");
-                return config with { HostedIssue = issue };
+                return config with { HostedIssue = issue, OperatorStart = true };
             }
             if (!url.IsLoopback || config.BaseBranch != "main")
                 throw new InvalidDataException("Factory-source qualification requires its approved loopback repository.");

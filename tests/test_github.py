@@ -44,6 +44,57 @@ class GitHubTest(unittest.TestCase):
         tid = self.poll()["taskId"]
         return self.controller.until(tid, lambda t: t["activity"] == "Delivered")
 
+    def test_issue_waits_for_operator_start(self):
+        profile = json.loads(self.profile.read_text())
+        profile["operatorStart"] = True
+        self.profile.write_text(json.dumps(profile))
+        app = self.controller
+        app.stop()
+        app.start(manual=False)
+        intake = app.api("dashboard/scenarios")["githubIntake"]
+        issue = intake["issues"][0]
+        selection = {"repositoryId":intake["repositoryId"], "issueId":issue["id"], "scopeHash":issue["scopeHash"]}
+        route = f"github/issues/{issue['number']}/start"
+        self.assertIsNone(self.poll()["taskId"])
+        self.assertEqual(app.api("tasks"), [])
+        app.stop()
+        app.start(manual=True)
+        self.assertIsNone(self.poll()["taskId"])
+        for path, body, token, expected in [
+            (route, selection, "foreign", 401), ("github/issues/33/start", selection, app.token, 409),
+            (route, {**selection, "scopeHash":"old"}, app.token, 409),
+            (route, {**selection, "repositoryId":99}, app.token, 409),
+            ("tasks", {"id":"aaaa0000-0000-0000-0000-000000000001","scenario":"known-decision"}, app.token, 400)
+        ]:
+            with self.assertRaises(HTTPError) as error:
+                app.api(path, body, token)
+            self.assertEqual(error.exception.code, expected)
+            error.exception.close()
+        self.gh.issues[1]["state"] = "closed"
+        with self.assertRaises(HTTPError) as error:
+            app.api(route, selection)
+        self.assertIn("closed", error.exception.read().decode())
+        error.exception.close()
+        self.assertEqual(app.api("tasks"), [])
+        self.gh.issues[1]["state"] = "open"
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            results = list(pool.map(lambda _:app.api(route, selection), range(2)))
+        self.assertEqual(results[0], results[1])
+        tid = results[0]["taskId"]
+        app.stop()
+        app.start(manual=True)
+        self.assertEqual(app.api(route, selection)["taskId"], tid)
+        self.assertEqual(self.poll()["taskId"], tid)
+        task, = app.api("tasks")
+        self.assertEqual(task["phase"], "Planning")
+        self.assertEqual(sum(entry["text"].startswith("Requested start of ") for entry in task["history"]), 1)
+        self.assertFalse(self.gh.writes)
+        if os.getenv("FACTORY_BROWSER_TEST") == "1":
+            subprocess.run(["node", "browser-issue-start.mjs", app.url, self.gh.repo, "2"],
+                           cwd=test_slice.ROOT/"src/Factory.Web", timeout=60, check=True,
+                           env=dict(os.environ, FACTORY_LOCAL_TOKEN=app.token))
+            self.assertEqual(len(app.api("tasks")), 2)
+
     def test_eligibility_and_duplicate_intake(self):
         with self.assertRaises(HTTPError) as error:
             self.poll(3)

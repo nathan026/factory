@@ -129,9 +129,11 @@ if (!manual && !restorePaused) builder.Services.AddHostedService<StallReconciler
 if (!manual && !restorePaused && !hatchet) builder.Services.AddHostedService<Dispatcher>();
 GitHubRepository? repository = null;
 GitHubSync? github = null;
+GitHubProject? operatorIntake = null;
 if (!restorePaused && Environment.GetEnvironmentVariable("FACTORY_GITHUB_PROJECT") is { Length: > 0 } profilePath)
 {
     var config = GitHubProject.Load(profilePath, project);
+    if (config.OperatorStart) operatorIntake = config;
     repository = new GitHubRepository(config, project.Policy.Version, project.Ci?.Rules.RepositoryLayout);
     github = new(config, repository, store, project, project.Ci);
     builder.Services.AddSingleton(config);
@@ -198,7 +200,12 @@ if (project.Ci is not null)
     app.MapPost("/internal/ci/{id}/result", (string id, CiDelivery body) => store.ReceiveCi(id, body));
 }
 if (github is not null)
+{
     app.MapPost("/api/github/issues/{number:int}/sync", (int number) => github.Poll(number));
+    if (operatorIntake is not null)
+        app.MapPost("/api/github/issues/{number:int}/start", async (int number, IssueStart selection) =>
+            new { taskId = await github.Start(number, selection) });
+}
 app.MapGet("/api/restore", () => new { paused = restorePaused, restore = store.LatestRestore(), blockers = store.RestoreBlockers() });
 if (restorePaused) app.MapPost("/api/restore/retire", (RestoreRetirement command) => store.RetireRestoredOperation(command));
 app.MapPost("/api/restore/release", (RestoreRelease command) => store.ReleaseRestore(command));
@@ -215,7 +222,8 @@ funds.MapPost("/advice", (Guid id, AdviceRequest body) => funding.Ask(id, body))
 funds.MapPost("/advice/{request:guid}/resume", (Guid id, Guid request, AttemptCommand body) => funding.Resume(id, request, body.Attempt));
 funds.MapPost("/advice/{request:guid}/cancel", (Guid id, Guid request, AttemptCommand body) => funding.Cancel(id, request, body.Attempt));
 funds.MapPost("/advice/{request:guid}/reconcile", (Guid id, Guid request, AttemptCommand body) => funding.Reconcile(id, request, body.Attempt));
-app.MapGet("/api/dashboard/scenarios", () => new { project.Goal, project.Scenarios, restorePaused });
+app.MapGet("/api/dashboard/scenarios", () => new { project.Goal, project.Scenarios, restorePaused,
+    githubIntake = operatorIntake is null ? null : new { operatorIntake.Repository, operatorIntake.RepositoryId, operatorIntake.Issues } });
 app.MapGet("/api/dashboard/queue", store.Queue);
 app.MapGet("/api/tasks/{id:guid}/workspace", (Guid id) => store.Workspace(id));
 app.MapGet("/api/tasks/{id:guid}/export", (Guid id) =>
@@ -230,7 +238,7 @@ app.MapGet("/api/tasks/{id:guid}/owner/documents/{part}", (Guid id, SourcePart p
 static IResult CommandResponse(HttpRequest request, WorkItem task) =>
     request.Headers["Prefer"] == "return=minimal" ? Results.NoContent() : Results.Ok(task);
 app.MapPost("/api/tasks", (HttpRequest request, Create body) =>
-    pinnedRepository || body.Id == Guid.Empty || !project.Supports(body.Scenario) || body.Message?.Length > 4000 ? Results.BadRequest()
+    pinnedRepository || operatorIntake is not null || body.Id == Guid.Empty || !project.Supports(body.Scenario) || body.Message?.Length > 4000 ? Results.BadRequest()
         : CommandResponse(request, store.Create(body.Id, body.Scenario, string.IsNullOrWhiteSpace(body.Message) ? null : body.Message.Trim())));
 app.MapPost("/api/tasks/{id:guid}/decision", (HttpRequest request, Guid id, Choice body) =>
     CommandResponse(request, store.Decide(id, body.Value, body.QuestionKey)));
