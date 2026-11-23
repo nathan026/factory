@@ -8,6 +8,7 @@ export type Task = {
   activity: Activity;
   openedAt: string | null;
   draftNumber?: number | null;
+  issueFinished?: boolean;
   lastActivity?: string;
   waitReason?: string;
 };
@@ -17,9 +18,12 @@ export type GitHubIntake = {
   repositoryId: number;
   issues: { number: number; id: number; scopeHash: string; scenario: string }[];
 };
-export type Catalog = { restorePaused: boolean; goal: string; scenarios: { id: string; label: string }[]; githubIntake?: GitHubIntake | null };
+export type Catalog = { issueActions?: boolean; restorePaused: boolean; goal: string; scenarios: { id: string; label: string }[]; githubIntake?: GitHubIntake | null };
 export type Exchange = { id: string; afterEntry: number; text: string; reply: string; sentAt: string };
+export type IssueAction = { id: string; kind: "follow-up" | "finish"; stage: string; scope: string; baseSha: string; headSha: string; commentId: string | null };
 export type Workspace = Task & {
+  previousDrafts?: {number: number; url: string; headSha: string}[];
+  issueAction?: IssueAction | null;
   summary: { issue: string; request: string | null; work: string[]; checks: string[] };
   recovery: {
     operationId: string;
@@ -109,6 +113,7 @@ export type Api = <T>(
 ) => Promise<T>;
 
 export function status(task: Task) {
+  if (task.issueFinished) return "Issue closed";
   if (task.draftNumber) return "Draft PR #" + task.draftNumber;
   return task.activity === "Waiting"
     ? "Decision needed"

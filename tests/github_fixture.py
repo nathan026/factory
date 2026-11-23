@@ -27,6 +27,9 @@ class GitHubFixture:
         self.issues = {}
         self._pulls = []
         self.writes = []
+        self.comments = []
+        self.protected = set()
+        self.drop_comment = self.drop_close = False
         self.drop_pr = False
         self.drop_ref = False
         self.hide_pulls = False
@@ -73,7 +76,7 @@ class GitHubFixture:
                     raw = self.rfile.read(length)
                 try:
                     with fixture.lock:
-                        if not url.path.startswith(prefix) or self.headers.get("Authorization"):
+                        if not (url.path.startswith(prefix) or url.path == "/graphql") or self.headers.get("Authorization"):
                             code, obj = 403, {}
                         else:
                             code, obj = fixture.respond(self.command, path, parse_qs(url.query), json.loads(raw) if raw else {})
@@ -91,7 +94,7 @@ class GitHubFixture:
                 self.end_headers()
                 self.wfile.write(data)
 
-            do_GET = do_POST = handle_request
+            do_GET = do_POST = do_PATCH = handle_request
 
         self.error = None
         self.http = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
@@ -181,6 +184,32 @@ class GitHubFixture:
         return 201, record
 
     def respond(self, method, path, query, obj):
+        if path == "graphql" and method == "POST":
+            mutation = obj["variables"]["input"]
+            change, = mutation["refUpdates"]
+            assert "updateRefs" in obj["query"] and mutation["repositoryId"] == "fixture-node"
+            assert change["afterOid"] == "0"*40 and change["name"].startswith("refs/heads/factory/")
+            self.git("update-ref", "-d", change["name"], change["beforeOid"])
+            self.writes.append("delete-ref")
+            return 200, {"data":{"updateRefs":{"clientMutationId":None}}}
+        if match := re.fullmatch(r"issues/(\d+)/comments",path):
+            if method == "GET":
+                return 200, [c for c in self.comments if c["issue"] == int(match[1])]
+            comment = {"user":{"login":"fixture[bot]"}, "body":obj["body"], "id":len(self.comments)+1, "issue":int(match[1])}
+            self.comments.append(comment)
+            if self.drop_comment:
+                self.drop_comment = False
+                return 502, {}
+            return 201, comment
+        if method == "PATCH" and path.startswith("issues/"):
+            assert obj == {"state":"closed","state_reason":"completed"}
+            issue = self.issues[int(path.split("/")[1])]
+            issue.update(obj)
+            self.writes.append("close-issue")
+            if self.drop_close:
+                self.drop_close = False
+                return 502, {}
+            return 200, issue
         if path=="factory/journal" and method=="GET":
             return 200, {"format":"factory-git-draft/v1","journal":self.git("cat-file","blob","refs/factory/journal")}
         if match := re.fullmatch(r"factory/journals/([a-f0-9]{32})/drafts/([a-f0-9]{32})",path):
@@ -190,7 +219,7 @@ class GitHubFixture:
             return self.atomic_draft(method,match[2],{**(obj or {}),"journalOid":self.git("hash-object","--stdin",data=match[1].encode())})
         if method == "GET":
             if not path:
-                return 200, {"id":self.repo_id, "full_name":self.repo}
+                return 200, {"id":self.repo_id, "full_name":self.repo, "node_id":"fixture-node", "default_branch":"main"}
             if path.startswith("issues/"):
                 issue = self.issues.get(int(path.split("/")[1]))
                 return (200, issue) if issue else (404, {})
@@ -211,6 +240,12 @@ class GitHubFixture:
             if path.startswith("git/trees/"):
                 sha = path.split("/")[-1]
                 return 200, {"sha":sha, "truncated":False, "tree":self.entries(sha)}
+            if path.startswith("pulls/"):
+                return next(((200,p) for p in self.pulls if p["number"] == int(path.split("/")[1])), (404,{}))
+            if path.startswith("branches/"):
+                return 200, {"protected":path.removeprefix("branches/") in self.protected}
+            if path == "pulls" and query["state"] == ["open"]:
+                return 200, [p for p in self.pulls if p["state"] == "open" and query["head"] == ["fixture:"+p["head"]["ref"]]]
             if path == "pulls":
                 assert query["state"] == ["all"]
                 return 200, [] if self.hide_pulls else [p for p in self.pulls if query["head"] == ["fixture:"+p["head"]["ref"]]
@@ -244,7 +279,7 @@ class GitHubFixture:
                 assert obj["draft"] is True and obj["base"] == "main" and obj["head"].startswith("factory/")
                 assert obj["maintainer_can_modify"] is False
                 number = len(self.pulls) + 20
-                pr = {"number":number, "state":"open", "draft":True, "body":obj["body"], "title":obj["title"],
+                pr = {"number":number, "merged":False, "state":"open", "draft":True, "body":obj["body"], "title":obj["title"],
                       "html_url":f"{self.url}/{self.repo}/pull/{number}",
                       "head":{"ref":obj["head"], "repo":{"id":self.repo_id},"sha":self.git("rev-parse","refs/heads/"+obj["head"])},
                       "base":{"ref":obj["base"],"repo":{"id":self.repo_id}}}

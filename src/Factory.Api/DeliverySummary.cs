@@ -10,6 +10,7 @@ public sealed record DeliverySummary(string Issue, string? Request, string[] Wor
         var opening = fromIssue ? task.OpeningMessage?.Split('\n', 2) : null;
         var issue = opening?.FirstOrDefault()?.Trim();
         var request = opening is [_, var body] ? Regex.Replace(body.Trim(), @"\s+", " ") : null;
+        request = task.FollowUp?.Scope ?? request;
         if (request?.Length > 250) request = request[..(char.IsHighSurrogate(request[249]) ? 249 : 250)] + "…";
         var work = new List<string>();
         var checks = new List<string>();
@@ -94,7 +95,7 @@ public sealed record DeliverySummary(string Issue, string? Request, string[] Wor
     }
 
     // Titles and file excerpts can contain Markdown, HTML or mentions. Render them as literal text.
-    private static string Literal(string value) => Regex.Replace(value,
+    internal static string Literal(string value) => Regex.Replace(value,
         @"[&<>\\`*_{}\[\]()#+!|~@]", m => $"&#{(int)m.Value[0]};");
 
     public string Markdown() => string.Join("\n", "## Issue", "", Literal(Issue) + (string.IsNullOrEmpty(Request) ? "" : "\n\n" + Literal(Request)), "", "## Work done", "",

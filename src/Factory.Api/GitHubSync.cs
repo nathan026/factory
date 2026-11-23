@@ -2,7 +2,7 @@ namespace Factory;
 
 public record IssueStart(long RepositoryId, long IssueId, string ScopeHash);
 
-public sealed class GitHubSync(GitHubProject config, GitHubRepository repo, TaskStore store, IControlledProject project, CiProfile? ci = null)
+public sealed partial class GitHubSync(GitHubProject config, GitHubRepository repo, TaskStore store, IControlledProject project, CiProfile? ci = null)
 {
     private ApprovedIssue Approval(int number) => config.Issues.SingleOrDefault(i => i.Number == number)
         ?? throw new CommandConflict("This issue is outside the configured admission list.");

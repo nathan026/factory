@@ -49,7 +49,10 @@ public record WorkOrder(Assignment Assignment, WorkAction Action, SourcePacket S
              || Source.Fingerprint() != Assignment.SourceHash
              || packet.Documents is not { Length: > 0 } || packet.Documents.Any(d => !d.Matches(Source, Assignment.SourceHash))))
             throw new InvalidDataException("Phase context does not match the admitted work order.");
-        if (project.Ci?.Rules.RepositoryLayout is not null && Source != project.Snapshot())
+        if (Context?.FollowUp is { } approved)
+            approved.Validate(this, project);
+        else if (project.Ci?.Rules.RepositoryLayout is not null && (Source != project.Snapshot() ||
+            project is HostedRepositoryProject && Context?.Brief.Goal != project.Goal))
             throw new InvalidDataException("Repository input differs from the profile pinned to Git.");
         BlueprintPolicy.CheckGrant(project, this);
     }

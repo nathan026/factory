@@ -6,14 +6,26 @@ public sealed class Lifecycle(IControlledProject project, CiProfile? ciProfile =
 {
     public DecisionOption[] Choices(WorkItem task) => task.Advice?.Consultation?.Options ?? project.Choices(task.Source);
 
-    public WorkItem Start(Guid id, string scenario, string? openingMessage = null, SourcePacket? source = null)
+    public WorkItem Start(Guid id, string scenario, string? openingMessage = null, SourcePacket? source = null, WorkItem? prior = null, RoundApproval? followUp = null)
     {
         if (!project.Policy.Valid()) throw new CommandConflict("Project verification policy is invalid.");
         if (!project.ExpertProfile.Valid()) throw new CommandConflict("Invalid expert profile.");
-        var task = new WorkItem { Id = id, OpenedAt = DateTimeOffset.UtcNow, OpeningMessage = openingMessage, Scenario = scenario, Goal = project.Goal, Source = source ?? project.Snapshot(),
+        var task = new WorkItem { Id = id, OwnerId = prior?.OwnerId ?? Guid.NewGuid(), FollowUp = followUp, OpenedAt = prior?.OpenedAt ?? DateTimeOffset.UtcNow, OpeningMessage = openingMessage, Scenario = scenario, Goal = followUp?.Scope ?? project.Goal, Source = source ?? project.Snapshot(),
             ContractVersion = ContractGate.Version, GateRule = GateEvaluation.Rule, Policy = project.Policy, ExpertRuntime = expertRuntime, OwnerRuntime = ownerRuntime, ExpertProfile = project.ExpertProfile };
-        task.Memory = OwnerMemory.Initialize(task, project.Describe(task.Source), legacy: false);
-        task.Record("Operator", openingMessage ?? task.Goal);
+        var brief = followUp is not null && project is HostedRepositoryProject hosted ? hosted.FollowUpBrief(task.Source) : project.Describe(task.Source);
+        task.Memory = OwnerMemory.Initialize(task, brief, legacy: false);
+        if (prior is not null)
+        {
+            task.History.AddRange(prior.History);
+            task.Gates.AddRange(prior.Gates);
+            var memory = task.Memory;
+            var revised = memory.Briefs[0] with { Version = prior.Memory!.Briefs.Count + 1 };
+            memory.Briefs.Clear();
+            memory.Briefs.AddRange(prior.Memory.Briefs);
+            memory.Briefs.Add(revised);
+            GateEvaluation.Record(task, GateInput.Capture(task), GateOutcome.Resume, "Operator approved follow-up work on this task.");
+        }
+        task.Record("Operator", followUp?.Scope ?? openingMessage ?? task.Goal);
         if (openingMessage is not null)
             task.Record("Lifecycle owner", $"Accepted goal for this task: {task.Goal}");
         return task;
@@ -187,7 +199,7 @@ public sealed class Lifecycle(IControlledProject project, CiProfile? ciProfile =
         }
         var feedback = action is WorkAction.Review || (action is WorkAction.Implement && task.Repairs > 0)
             ? task.Receipts.LastOrDefault() : null;
-        var packet = memory.Packet(task, action);
+        var packet = memory.Packet(task, action) with { FollowUp = task.FollowUp };
         if (action == WorkAction.Implement && task.AskingRun is { } asking)
         {
             var reply = task.OwnerReply;
@@ -466,7 +478,9 @@ public sealed class Lifecycle(IControlledProject project, CiProfile? ciProfile =
         // In the controlled project the question contract is known at admission. Worker prose
         // and the worker's requested authority cannot select a different route.
         var admitted = project.AdmittedQuestion(task.Scenario);
-        var answer = project.Investigate(admitted, task.Source, brief);
+        var answer = task.FollowUp is { } approval && project is HostedRepositoryProject hosted
+            ? new Decision("repository-scope", admitted.Subject, approval.Scope, hosted.Ci.Rules.RepositoryLayout!.Source)
+            : project.Investigate(admitted, task.Source, brief);
         if (question != admitted && (answer is null || !CanDiscussWorkerQuestion(task, question, admitted)))
         {
             Block(task, "Question differs from the admitted subject or authority.");

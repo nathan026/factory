@@ -27,6 +27,53 @@ from environment_leases import Leases
 
 
 class ProjectCiTest(unittest.TestCase):
+    def test_followup_ci_checks_approved_revision_before_execution(self):
+        from unittest.mock import patch
+        from uuid import uuid4
+        from environment_leases import IMAGE, fingerprint
+        repo = test_slice.ROOT
+        git = lambda *args: subprocess.check_output(["git",*args],cwd=repo).decode()
+        revision = git("rev-parse","HEAD").strip()
+        paths = {"source":"shipping-rule.json","decisions":"decisions.json","cases":"acceptance.json"}
+        source = {key:git("show",revision+":fixtures/shipping/repository/"+path) for key,path in paths.items()}
+        source["additionalFiles"] = "{}"
+        candidate = source["source"].replace("greater","at-least")
+        self.assertNotEqual(candidate,source["source"])
+        script = ("const p=JSON.parse(require('fs').readFileSync(0,'utf8')); console.log(p.selector); "
+                  "process.exitCode=p.baseSource.includes('greater') && p.candidate.includes('at-least') ? 0 : 1;")
+        policy = {"version":"followup-ci/v1","requiredChecks":["boundary"]}
+        layout = {**paths,"commands":[["node","verify.cjs"]],"additionalReads":[]}
+        manifest = json.dumps({"policy":policy,"repositoryLayout":layout,"environment":IMAGE,"scriptHash":fingerprint(script),
+                               "settings":{"base":git("rev-parse","HEAD^").strip()}})
+        tid, aid = uuid4(), uuid4()
+        source_hash = fingerprint(json.dumps(source))
+        approval = {"taskId":str(tid),"id":str(aid),"baseSha":revision,"sourceHash":source_hash,
+                    "scope":"Check the boundary.","policyHash":fingerprint(manifest)}
+        documents = [{"part":part.title(),"path":path,"digest":fingerprint(source[part]),"revision":source_hash}
+                     for part,path in paths.items()]
+        order = {"source":source,"candidate":candidate,"answer":{"value":"5000"},
+                 "assignment":{"taskId":str(tid),"sourceHash":source_hash,"policyVersion":policy["version"],
+                               "inputHash":fingerprint(candidate),"requiredChecks":policy["requiredChecks"]},
+                 "context":{"brief":{"goal":approval["scope"]},"followUp":approval,"documents":documents,
+                            "blueprint":{"manifestHash":fingerprint(manifest),"tools":["checks.run","source.read","decisions.read","cases.read"]}}}
+        binding = {"taskId":str(tid),"executionId":str(uuid4()),"sourceHash":source_hash,"candidateHash":fingerprint(candidate),
+                   "policyHash":fingerprint(manifest),"scriptHash":fingerprint(script),"revisionKind":"git","revision":revision,"environment":IMAGE}
+        job = {"binding":binding,"order":order,"token":"fixture","script":script,"deadlineUnix":time.time()+90}
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, FACTORY_CONTROLLER_RELEASE=tmp,FACTORY_FOLLOWUP_APPROVALS=tmp):
+            directory = Path(tmp)/"projects/followup-ci"
+            directory.mkdir(parents=True)
+            (directory/"v1-policy.json").write_text(manifest)
+            grant = Path(tmp)/(tid.hex+"-"+aid.hex+".json")
+            with self.assertRaises(FileNotFoundError):
+                run_ci.execute(job,object())
+            grant.write_text(json.dumps(approval))
+            stale = deepcopy(job)
+            stale["binding"]["revision"] = json.loads(manifest)["settings"]["base"]
+            with self.assertRaisesRegex(ValueError,"Git revision"):
+                run_ci.execute(stale,object())
+            check, = run_ci.execute(job,Leases(Path(tmp)/"leases.db"))["checks"]
+            self.assertEqual((check["id"],check["exitCode"]),("boundary",0))
+
     def start_project(self, name, edition="v1"):
         folder = tempfile.TemporaryDirectory()
         self.addCleanup(folder.cleanup)

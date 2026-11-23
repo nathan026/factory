@@ -109,6 +109,30 @@ static class HostedGitHubChecks
             throw new Exception("Owner failed to retain the approved single-file scope through planning.");
         if (project.CandidateError(new string('x', 16385)) is null || project.CandidateError("body {}") is not null)
             throw new Exception("Unexpected hosted candidate size bound.");
+        var previous = Environment.GetEnvironmentVariable("FACTORY_FOLLOWUP_APPROVALS");
+        try
+        {
+            Environment.SetEnvironmentVariable("FACTORY_FOLLOWUP_APPROVALS",directory);
+            var merged = task.Source with { Source="body { color: orange; }" };
+            var approval = new RoundApproval(Guid.NewGuid(),task.Id,"Improve the focus outline.",new string('b',40),
+                merged.Fingerprint(),project.Ci.Hash);
+            approval.Persist();
+            var next = owner.Start(task.Id,task.Scenario,task.OpeningMessage,merged,task,approval);
+            WorkOrder? writer = null;
+            for (var i=0; i<10 && writer is null; i++)
+            {
+                var assignment=owner.Prepare(next);
+                if (assignment is null) continue;
+                if (assignment.Action==WorkAction.Implement) writer=assignment;
+                else owner.Apply(next,assignment,assignment.Execute(project),Guid.NewGuid());
+            }
+            if (writer?.Context?.FollowUp!=approval || writer.Answer?.Text!=approval.Scope || writer.Context.Brief.Goal!=approval.Scope)
+                throw new Exception("Follow-up lost the operator's decision or base.");
+            writer.Validate(project);
+            try { (writer with { Context=writer.Context with { FollowUp=null } }).Validate(project); throw new Exception("Missing admission was accepted."); }
+            catch (InvalidDataException) { }
+        }
+        finally { Environment.SetEnvironmentVariable("FACTORY_FOLLOWUP_APPROVALS",previous); }
         try { project.Implement(order.Assignment, task.Source, order.Answer, null, order.Context); }
         catch (CommandConflict) { return; }
         throw new Exception("Controlled worker implemented a hosted change");

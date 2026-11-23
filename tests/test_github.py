@@ -44,6 +44,156 @@ class GitHubTest(unittest.TestCase):
         tid = self.poll()["taskId"]
         return self.controller.until(tid, lambda t: t["activity"] == "Delivered")
 
+    def enable_issue_actions(self):
+        from unittest.mock import patch
+        env = patch.dict(os.environ, FACTORY_FOLLOWUP_APPROVALS=str(self.profile.parent))
+        env.start()
+        self.addCleanup(env.stop)
+        config = json.loads(self.profile.read_text())
+        config["issueActionBot"] = "fixture[bot]"
+        self.profile.write_text(json.dumps(config))
+        self.controller.stop()
+        self.controller.start(manual=True)
+
+    def test_operator_followup_and_finish(self):
+        self.enable_issue_actions()
+        app, gh = self.controller, self.gh
+        route = "github/issues/1/actions"
+        original = self.ready()
+        tid = original["id"]
+        first = self.poll()["draft"]
+        previous, = gh.pulls
+        if os.getenv("FACTORY_BROWSER_TEST") == "1":
+            subprocess.run(["node","browser-issue-actions.mjs",app.url,gh.base], cwd=test_slice.ROOT/"src/Factory.Web",
+                           timeout=60,check=True,env=dict(os.environ,FACTORY_LOCAL_TOKEN=app.token))
+        command = {"taskId":tid, "headSha":first["headSha"], "baseSha":gh.base, "scope":"Check the exact shipping boundary again."}
+        def rejected(path, data, code):
+            with self.assertRaises(HTTPError) as caught:
+                app.api(route+"/"+path,data)
+            self.assertEqual(caught.exception.code, code, caught.exception.read())
+            caught.exception.close()
+        rejected("finish", {**command,"scope":""},409)
+        rejected("follow-up",{**command,"baseSha":"f"*40},409)
+        self.assertEqual(gh.comments, [])
+        gh.drop_comment = True
+        rejected("follow-up",command,502)
+        app.stop()
+        app.start(manual=True)
+        result = app.api(route+"/follow-up",command)
+        self.assertEqual(result["stage"], "started")
+        self.assertEqual(result, app.api(route+"/follow-up",command))
+        self.assertEqual(len(gh.comments),1)
+        current, = app.api("tasks")
+        self.assertEqual((current["id"],current["ownerId"],current["phase"],current["goal"]),
+                         (tid,original["ownerId"],"Planning",command["scope"]))
+        self.assertEqual(current["memory"]["briefs"][:-1],original["memory"]["briefs"])
+        again = app.until(tid,lambda t:t["activity"]=="Delivered")
+        self.assertNotEqual(again["review"]["runId"],original["review"]["runId"])
+        final = self.poll()["draft"]
+        self.assertNotEqual(first["headSha"], final["headSha"])
+        last = gh.pulls[-1]
+        last.update(state="closed",merged=True)
+        gh.git("update-ref","refs/heads/main",final["headSha"],gh.base)
+        finish = {**command, "scope":"", "headSha":final["headSha"],"baseSha":final["headSha"]}
+        gh.drop_close = True
+        rejected("finish",finish,502)
+        app.stop()
+        app.start(manual=True)
+        result = app.api(route+"/finish",finish)
+        self.assertEqual(result["stage"],"finished")
+        self.assertEqual(result,app.api(route+"/finish",finish))
+        self.assertEqual(len(gh.comments),2)
+        for term in ("PR #20","PR #21","independent reviewer"):
+            self.assertIn(term,gh.comments[-1]["body"])
+        self.assertEqual(gh.writes.count("close-issue"),1)
+        self.assertEqual(gh.writes.count("delete-ref"),1)
+        self.assertEqual(gh.git("rev-parse","refs/heads/"+previous["head"]["ref"]),first["headSha"])
+        self.assertEqual(gh.git("rev-parse","refs/heads/main"),final["headSha"])
+        self.assertEqual(app.api(f"tasks/{tid}/workspace")["issueAction"]["stage"],"finished")
+        self.assertIsNone(gh.error)
+
+    def test_finish_keeps_protected_and_moved_refs(self):
+        self.enable_issue_actions()
+        app, gh = self.controller, self.gh
+        for issue in (1,2):
+            task = self.poll(issue)["taskId"]
+            app.until(task,lambda t:t["activity"]=="Delivered")
+            receipt = self.poll(issue)["draft"]
+            pr = gh.pulls[-1]
+            pr.update(state="closed",merged=True)
+            branch = pr["head"]["ref"]
+            ref = "refs/heads/"+branch
+            if issue==1:
+                gh.protected.add(branch)
+            else:
+                gh.git("update-ref",ref,gh.base,receipt["headSha"])
+            if issue==1 and os.getenv("FACTORY_BROWSER_TEST") == "1":
+                subprocess.run(["node","browser-issue-actions.mjs",app.url,gh.base,"finish"],cwd=test_slice.ROOT/"src/Factory.Web",
+                               timeout=60,check=True,env=dict(os.environ,FACTORY_LOCAL_TOKEN=app.token))
+            result = app.api(f"github/issues/{issue}/actions/finish",
+                             {"taskId":task,"headSha":receipt["headSha"],"baseSha":gh.base,"scope":""})
+            self.assertEqual(result["stage"],"finished")
+            self.assertEqual(gh.git("rev-parse",ref),receipt["headSha"] if issue==1 else gh.base)
+            self.assertIn("Kept "+branch,app.get(task)["history"][-1]["text"])
+        self.assertNotIn("delete-ref",gh.writes)
+
+    def test_merged_followup_uses_approved_base(self):
+        app, gh = self.controller, self.gh
+        task = self.ready()
+        receipt = self.poll()["draft"]
+        route = "github/issues/1/actions"
+        query = "?taskId="+task["id"]+"&headSha="+receipt["headSha"]
+        with self.assertRaises(HTTPError) as disabled:
+            app.api(route+query)
+        self.assertEqual(disabled.exception.code,409)
+        disabled.exception.close()
+        self.enable_issue_actions()
+        pr, = gh.pulls
+        pr.update(merged=True,state="closed")
+        gh.git("update-ref","refs/heads/main",receipt["headSha"],gh.base)
+        preview = app.api(route+query)
+        self.assertTrue(preview["merged"])
+        self.assertEqual(preview["baseSha"],receipt["headSha"])
+        command = {"taskId":task["id"],"headSha":receipt["headSha"],"baseSha":preview["baseSha"],"scope":"Check the merged rule."}
+        # Persist a comment before the response is lost. Advance main before admission.
+        gh.drop_comment = True
+        with self.assertRaises(HTTPError) as lost:
+            app.api(route+"/follow-up",command)
+        lost.exception.close()
+        next_base = gh.git("commit-tree",gh.git("rev-parse","main^{tree}"),"-p",preview["baseSha"],"-m","Another accepted revision")
+        gh.git("update-ref","refs/heads/main",next_base,preview["baseSha"])
+        with self.assertRaises(HTTPError) as stale:
+            app.api(route+"/follow-up",command)
+        self.assertEqual(stale.exception.code,409)
+        stale.exception.close()
+        self.assertEqual(app.api(route+"/withdraw",{**command,"actionId":app.api(route+query)["state"]["id"]})["stage"],"withdrawn")
+        if os.getenv("FACTORY_BROWSER_TEST") == "1":
+            subprocess.run(["node","browser-issue-actions.mjs",app.url,next_base,"start",command["scope"]],
+                           cwd=test_slice.ROOT/"src/Factory.Web",timeout=60,check=True,env=dict(os.environ,FACTORY_LOCAL_TOKEN=app.token))
+        result = app.api(route+"/follow-up",{**command,"baseSha":next_base})
+        self.assertEqual(result["stage"],"started")
+        current, = app.api("tasks")
+        self.assertEqual(current["id"],task["id"])
+        self.assertEqual(current["followUp"]["baseSha"],next_base)
+        self.assertEqual(current["source"]["source"],task["candidate"])
+        self.assertEqual(len(gh.comments),2)
+        self.assertEqual(self.poll()["origin"]["baseSha"],next_base)
+        # The trusted adapter must reject both a modified and a missing grant.
+        app.until(task["id"],lambda t:t["phase"]=="Implementation")
+        with closing(sqlite3.connect(Path(app.folder)/"slice.db")) as db:
+            orders = [json.loads(r[0]) for r in db.execute("SELECT request FROM dispatch_outbox")]
+        order = next(o for o in orders if (o.get("context") or {}).get("followUp"))
+        def worker(packet):
+            return subprocess.run(["dotnet",str(test_slice.DLL),"--fixture-worker"],input=json.dumps(packet),
+                                  text=True,capture_output=True,timeout=10)
+        self.assertEqual(worker(order).returncode,0)
+        forged = deepcopy(order)
+        forged["context"]["followUp"]["baseSha"]=gh.base
+        self.assertNotEqual(worker(forged).returncode,0)
+        grant = self.profile.parent / (task["id"].replace("-","")+"-"+result["id"].replace("-","")+".json")
+        grant.unlink()
+        self.assertNotEqual(worker(order).returncode,0)
+
     def test_issue_waits_for_operator_start(self):
         profile = json.loads(self.profile.read_text())
         profile["operatorStart"] = True

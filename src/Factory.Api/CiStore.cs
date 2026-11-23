@@ -43,7 +43,10 @@ public sealed partial class TaskStore
     }
 
     private static int AdmittedCiRounds(Session s, Guid taskId) => int.Parse(s.Text(
-        "SELECT CAST(COUNT(*) AS TEXT) FROM ci_runs WHERE task_id=@task", ("task", taskId.ToString()))!);
+        """
+        SELECT CAST(COUNT(*) - COALESCE((SELECT MAX(ci_total) FROM github_issue_actions WHERE task_id=@task AND stage='started'),0) AS TEXT)
+        FROM ci_runs WHERE task_id=@task
+        """, ("task", taskId.ToString()))!);
 
     private object? CiBudget(Session s, Guid taskId) => ciProfile?.Rules.Blueprint is { } policy
         ? new { admitted = AdmittedCiRounds(s, taskId), limit = policy.MaxCiRounds, secondsPerRound = policy.MaxCiSeconds } : null;

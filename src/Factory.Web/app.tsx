@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
+import { IssueActions } from "./issue-actions";
 import { age, Api, Catalog, GitHubIntake, QueueRow, status, Task, Workspace } from "./types";
 import { Brief, Conversation, EvidencePanel, ExpertAdvice, RecoverOperation } from "./panels";
 
@@ -405,6 +406,11 @@ function Desk({ api, signOut }: { api: Api; signOut: () => void }) {
                       <p>Awaiting GitHub confirmation of the original Draft PR request.</p>
                     )
                   )}
+                  {!!task.previousDrafts?.length && <details><summary>Earlier deliveries</summary><ul>
+                    {task.previousDrafts.map(pr=><li key={pr.number}><a href={pr.url}>PR #{pr.number}</a> · <code>{pr.headSha.slice(0,12)}</code></li>)}
+                  </ul></details>}
+                  {catalog?.issueActions && task.repository.draft && task.activity === "Delivered" &&
+                    <IssueActions key={task.id + task.repository.draft.headSha} task={task} api={api} ready={ready} update={update} />}
                 </section>
               )}
               {detailError && <p role="alert">{detailError} · Reconnecting…</p>}

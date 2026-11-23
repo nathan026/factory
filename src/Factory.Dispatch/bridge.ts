@@ -59,7 +59,7 @@ async function execute({order, workerMode}: Claim, signal: AbortSignal, deadline
     const providerEnv = Object.fromEntries(Object.entries(process.env).filter(([key]) =>
         ["path", "systemroot", "temp", "tmp", "userprofile", "home", "localappdata", "appdata",
          "docker_context", "docker_host", "docker_config", "factory_lease_db", "factory_max_leases",
-         "factory_controller_release"].includes(key.toLowerCase())));
+         "factory_controller_release", "factory_followup_approvals"].includes(key.toLowerCase())));
     if (workerMode === "codex-subscription") {
         if (!providerEnv.FACTORY_LEASE_DB) throw new Error("Live execution requires the shared lease journal.");
         const directory = mkdtempSync(join(tmpdir(), "factory-dispatch-"));

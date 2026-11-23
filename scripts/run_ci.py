@@ -8,6 +8,8 @@ import re
 import subprocess
 import sys
 import time
+from pathlib import Path
+from uuid import UUID
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 from urllib.request import build_opener, HTTPRedirectHandler, ProxyHandler, Request
@@ -94,8 +96,20 @@ def execute(job, leases=None):
     layout = rules["repositoryLayout"] if rules else None
     if layout:
         # Only map the verified candidate into the approved write path. Other files retain their admitted bytes.
+        revision = rules["settings"]["base"]
+        approved = order["context"].get("followUp")
+        if approved:
+            root = Path(os.environ.get("FACTORY_FOLLOWUP_APPROVALS", ""))
+            if not root.is_absolute():
+                raise ValueError("Missing trusted follow-up approval directory")
+            target = root / (UUID(binding["taskId"]).hex+"-"+UUID(approved["id"]).hex+".json")
+            if (json.loads(target.read_text(encoding="utf-8")) != approved or approved["taskId"] != binding["taskId"]
+                    or approved["sourceHash"] != binding["sourceHash"] or approved["policyHash"] != binding["policyHash"]
+                    or approved["scope"] != order["context"]["brief"]["goal"]):
+                raise ValueError("CI inputs differ from the operator's approval")
+            revision = approved["baseSha"]
         if (binding["candidateHash"] != order["assignment"]["inputHash"] or binding["revisionKind"] != "git"
-                or binding["revision"] != rules["settings"]["base"]
+                or binding["revision"] != revision
                 or binding["environment"] != rules["environment"] or binding["scriptHash"] != rules["scriptHash"]
                 or order["assignment"]["requiredChecks"] != rules["policy"]["requiredChecks"]):
             raise ValueError("Repository commands require an admitted Git revision")

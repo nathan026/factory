@@ -116,6 +116,16 @@
             "localFeedback": {"type":"array","items":{"$ref":"#/$defs/gateEvaluation/properties/criteria/items"}}
           }
         },
+        "followUp": {
+          "type": "object", "additionalProperties": false,
+          "required": ["id","taskId","scope","baseSha","sourceHash","policyHash"],
+          "properties": {
+            "id": {"$ref":"#/$defs/id"}, "taskId": {"$ref":"#/$defs/id"},
+            "scope": {"type":"string","minLength":1,"maxLength":2000},
+            "baseSha": {"type":"string","pattern":"^[a-f0-9]{40}$"},
+            "sourceHash": {"$ref":"#/$defs/hash"}, "policyHash": {"type":"string","pattern":"^([a-f0-9]{64})?$"}
+          }
+        },
         "ownerReply": {
           "type": "object", "additionalProperties": false,
           "required": ["askingRun", "recipientRun", "question", "answer", "evidenceDigest"],
