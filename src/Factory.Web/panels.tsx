@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Api, Evidence, Exchange, Workspace } from "./types";
 
 export function Conversation({
@@ -17,14 +17,14 @@ export function Conversation({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [sent, setSent] = useState<Exchange | null>(null);
-  const replyPanel = useRef<HTMLElement>(null);
+  const historyPane = useRef<HTMLDivElement>(null);
+  const followLatest = useRef(true);
   // Use the acknowledgement immediately. Polling supplies subsequent owner updates.
   const latest = sent && !task.messages.some(m => m.id === sent.id) ? sent : task.messages.at(-1);
-  useEffect(() => {
-    if (!sent) return;
-    replyPanel.current?.focus({ preventScroll: true });
-    replyPanel.current?.scrollIntoView({ block: "nearest" });
-  }, [sent]);
+  useLayoutEffect(() => {
+    const pane = historyPane.current;
+    if (pane && followLatest.current) pane.scrollTop = pane.scrollHeight;
+  });
   const messages = new Map<number, typeof task.messages>();
   for (const message of task.messages) {
     if (message.id === latest?.id) continue;
@@ -63,7 +63,33 @@ export function Conversation({
       </React.Fragment>
     ));
   return (
-    <section aria-label="Task conversation">
+    <section className="conversation" aria-label="Task conversation">
+      <div
+        className="conversation-history"
+        ref={historyPane}
+        tabIndex={0}
+        onScroll={({ currentTarget: pane }) => {
+          followLatest.current = pane.scrollHeight - pane.clientHeight - pane.scrollTop <= 1;
+        }}
+      >
+        <h3>Conversation &amp; activity</h3>
+        <ol className="thread">
+          {exchanges(0)}
+          {task.history.map((e) => (
+            <React.Fragment key={e.number}>
+              <Line actor={e.actor} text={e.text} />
+              {exchanges(e.number)}
+            </React.Fragment>
+          ))}
+        </ol>
+        {latest && (
+          <section className="reading latest-reply" aria-label="Latest owner reply">
+            <h3>Latest owner reply</h3>
+            <p className="reply-text" aria-live="polite">{latest.reply}</p>
+            <details><summary>Your message</summary><p>{latest.text}</p></details>
+          </section>
+        )}
+      </div>
       <form className="composer" onSubmit={send}>
         <label htmlFor="discussion">Message the lifecycle owner</label>
         <textarea
@@ -81,23 +107,6 @@ export function Conversation({
         </div>
         {error && <p role="alert">{error}</p>}
       </form>
-      {latest && (
-        <section className="reading latest-reply" aria-label="Latest owner reply" ref={replyPanel} tabIndex={-1}>
-          <h3>Latest owner reply</h3>
-          <p className="reply-text" aria-live="polite">{latest.reply}</p>
-          <details><summary>Your message</summary><p>{latest.text}</p></details>
-        </section>
-      )}
-      <h3>Conversation &amp; activity</h3>
-      <ol className="thread">
-        {exchanges(0)}
-        {task.history.map((e) => (
-          <React.Fragment key={e.number}>
-            <Line actor={e.actor} text={e.text} />
-            {exchanges(e.number)}
-          </React.Fragment>
-        ))}
-      </ol>
     </section>
   );
 }

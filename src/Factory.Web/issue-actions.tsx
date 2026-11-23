@@ -30,7 +30,7 @@ export function IssueActions({task, api, ready, update}: {task: Workspace; api: 
       setForm(null); update();
     } catch (e) { setError((e as Error).message); update(); } finally { setBusy(false); }
   }
-  if (saved?.stage==="finished") return <p>Issue closed. <a href={repo.issueUrl+"#issuecomment-"+saved.commentId}>Read the final summary</a></p>;
+  if (saved?.stage==="finished") return <p>Issue closed. <a href={repo.issueUrl+"#issuecomment-"+saved.commentId} target="_blank" rel="noopener noreferrer">Read the final summary</a></p>;
   return <div>
     {!form && <div className="actions">
       {(!saved || saved.kind==="follow-up") && <button disabled={!ready || busy} onClick={()=>open("follow-up")}>{saved ? "Reconcile follow-up" : "Request follow-up"}</button>}

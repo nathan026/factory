@@ -1,7 +1,7 @@
 import { WriterRecovery } from "./writer-recovery";
 import { GitHubIssueForm } from "./issue-picker";
 import { ReviseRound } from "./revise-round";
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { IssueActions } from "./issue-actions";
 import { age, Api, Catalog, QueueRow, status, Task, Workspace } from "./types";
@@ -98,8 +98,26 @@ function App() {
   );
 }
 
+type DeskQueueRow = QueueRow & { task: Task & { issueTitle?: string | null } };
+
+// A number records when a failed background lookup can be retried.
+type LegacyTitle = string | null | number;
+
 function Desk({ api, signOut }: { api: Api; signOut: () => void }) {
-  const [rows, setRows] = useState<QueueRow[]>([]);
+  const [rows, setRows] = useState<DeskQueueRow[]>([]);
+  const queueList = useRef<HTMLUListElement>(null);
+  const [legacyTitles, setLegacyTitles] = useState(() => new Map<string, LegacyTitle>());
+  const rememberLegacyTitle = useCallback((taskId: string, title: LegacyTitle) => {
+    setLegacyTitles((previous) => {
+      if (previous.get(taskId) === title) return previous;
+      const next = new Map(previous);
+      next.delete(taskId);
+      next.set(taskId, title);
+      const oldest = next.keys().next().value;
+      if (next.size > 128 && oldest !== undefined) next.delete(oldest);
+      return next;
+    });
+  }, []);
   const [catalog, setCatalog] = useState<Catalog | null>(null);
   const [linked, setLinked] = useState(() => new URLSearchParams(location.search).get("task"));
   const [selected, setSelected] = useState(() => linked ?? sessionStorage.getItem("factory-selected") ?? "");
@@ -127,6 +145,79 @@ function Desk({ api, signOut }: { api: Api; signOut: () => void }) {
   const blocked = rows.filter((r) => r.task.activity === "Blocked").length;
   const attention = rows.filter((r) => r.task.activity === "Waiting").length;
   const label = (t: Task) => catalog?.scenarios.find((s) => s.id === t.scenario)?.label || t.scenario;
+  const filteredRows = rows.filter(
+    ({ task }) => filter === "all" || task.activity === (filter === "blocked" ? "Blocked" : "Waiting"),
+  );
+  const legacyIntake = !!catalog?.githubIntake;
+  const selectedLegacy = legacyIntake && row?.task.issueTitle === undefined;
+  const legacyQueueKey = legacyIntake
+    ? filteredRows.filter(({ task }) => task.issueTitle === undefined && task.id !== id)
+        .map(({ task }) => task.id).join(",")
+    : "";
+  useEffect(() => {
+    if (selectedLegacy && task) {
+      rememberLegacyTitle(task.id, task.repository ? task.summary.issue : null);
+    }
+  }, [selectedLegacy, task, rememberLegacyTitle]);
+
+  useEffect(() => {
+    if (!legacyQueueKey || !queueList.current) return;
+    const ctrl = new AbortController();
+    const visible = new Set<string>();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let loading = false;
+
+    // Read only rows encountered in the viewport, with one background lookup at a time.
+    function loadVisible() {
+      clearTimeout(timer);
+      if (loading) return;
+      const now = Date.now();
+      let retryAt = Infinity;
+      for (const taskId of visible) {
+        const cached = legacyTitles.get(taskId);
+        if (cached === null || typeof cached === "string") continue;
+        if (typeof cached === "number" && cached > now) {
+          retryAt = Math.min(retryAt, cached);
+          continue;
+        }
+        loading = true;
+        void api<Workspace>("tasks/" + taskId + "/workspace", { signal: ctrl.signal })
+          .then((value) => {
+            if (!ctrl.signal.aborted) {
+              rememberLegacyTitle(taskId, value.repository ? value.summary.issue : null);
+            }
+          })
+          .catch(() => {
+            if (!ctrl.signal.aborted) rememberLegacyTitle(taskId, Date.now() + 15000);
+          });
+        return;
+      }
+      if (Number.isFinite(retryAt)) timer = setTimeout(loadVisible, retryAt - now);
+    }
+
+    const observer = new IntersectionObserver((entries) => {
+      if (ctrl.signal.aborted) return;
+      for (const entry of entries) {
+        const taskId = entry.target.getAttribute("data-legacy-task")!;
+        if (entry.isIntersecting) visible.add(taskId);
+        else visible.delete(taskId);
+      }
+      loadVisible();
+    });
+    queueList.current.querySelectorAll("[data-legacy-task]").forEach((item) => observer.observe(item));
+    return () => {
+      observer.disconnect();
+      ctrl.abort();
+      clearTimeout(timer);
+    };
+  }, [api, legacyQueueKey, legacyTitles, rememberLegacyTitle]);
+
+  function queueTitle(t: DeskQueueRow["task"]) {
+    if (t.issueTitle !== undefined || !legacyIntake) return t.issueTitle ?? label(t);
+    if (task?.id === t.id) return task.repository ? task.summary.issue : label(t);
+    const cached = legacyTitles.get(t.id);
+    return typeof cached === "string" ? cached : label(t);
+  }
   const update = () => setRefresh((x) => x + 1);
   function clearLink() {
     if (linked !== null) {
@@ -152,7 +243,7 @@ function Desk({ api, signOut }: { api: Api; signOut: () => void }) {
     async function poll() {
       try {
         const [list, options] = await Promise.all([
-          api<QueueRow[]>("dashboard/queue", { signal: ctrl.signal }),
+          api<DeskQueueRow[]>("dashboard/queue", { signal: ctrl.signal }),
           catalog ? Promise.resolve(catalog) : api<Catalog>("dashboard/scenarios", { signal: ctrl.signal }),
         ]);
         if (ctrl.signal.aborted) return;
@@ -281,33 +372,34 @@ function Desk({ api, signOut }: { api: Api; signOut: () => void }) {
                 Blocked <b>{blocked}</b>
               </button>
             </div>
-            <ul className="task-list">
-              {rows
-                .filter(
-                  (r) =>
-                    filter === "all" || r.task.activity === (filter === "blocked" ? "Blocked" : "Waiting"),
-                )
-                .map(({ task: t }) => (
-                  <li key={t.id}>
-                    <button
-                      className="queue-task"
-                      aria-pressed={!isNew && id === t.id}
-                      onClick={() => choose(t.id)}
+            <ul className="task-list" ref={queueList}>
+              {filteredRows.map(({ task: t }) => {
+                const title = queueTitle(t);
+                return (
+                    <li
+                      key={t.id}
+                      data-legacy-task={legacyIntake && t.issueTitle === undefined && t.id !== id ? t.id : undefined}
                     >
-                      <span className="row-meta">
-                        <code>{t.id.slice(0, 8)}</code>
-                        <small>{age(t.openedAt)}</small>
-                      </span>
-                      <strong>{label(t)}</strong>
-                      <span className="row-meta">
-                        <span className={"status " + t.activity}>{status(t)}</span> {t.phase}
-                      </span>
-                      {(t.waitReason || t.lastActivity) && (
-                        <span className="row-note">{t.waitReason || t.lastActivity}</span>
-                      )}
-                    </button>
-                  </li>
-                ))}
+                      <button
+                        className="queue-task"
+                        aria-pressed={!isNew && id === t.id}
+                        onClick={() => choose(t.id)}
+                      >
+                        <span className="row-meta">
+                          <code>{t.id.slice(0, 8)}</code>
+                          <small>{age(t.openedAt)}</small>
+                        </span>
+                        <strong title={title}>{title}</strong>
+                        <span className="row-meta">
+                          <span className={"status " + t.activity}>{status(t)}</span> {t.phase}
+                        </span>
+                        {(t.waitReason || t.lastActivity) && (
+                          <span className="row-note">{t.waitReason || t.lastActivity}</span>
+                        )}
+                      </button>
+                    </li>
+                );
+              })}
             </ul>
             {filter === "blocked" && !blocked && <p className="muted">No blocked tasks.</p>}
             {filter === "decisions" && !attention && <p className="muted">No decisions waiting.</p>}
@@ -334,136 +426,142 @@ function Desk({ api, signOut }: { api: Api; signOut: () => void }) {
               {detailError || (connection === "offline" ? "Waiting for controller…" : "Loading task desk…")}
             </p>
           ) : (
-            <article>
+            <article className="open-task">
               <div className="task-heading">
                 <div className="heading-meta">
                   <code>TASK / {id.slice(0, 8)}</code>
                   <span className={"status " + task.activity}>{status(task)}</span>
                 </div>
                 <h1>{task.repository ? task.summary.issue : label(task)}</h1>
+              </div>
+              <div className="task-main">
+                <nav className="tabs" aria-label="Task views">
+                  {(["Conversation", "Brief", "Evidence", "Funding"] as const).map((t) => (
+                    <button key={t} aria-current={tab === t ? "page" : undefined} onClick={() => setTab(t)}>
+                      {t}
+                    </button>
+                  ))}
+                </nav>
+                <div className="task-view">
+                  {tab === "Conversation" && (
+                    <Conversation key={id} task={task} api={api} ready={ready} changed={update} />
+                  )}
+                  {tab === "Brief" && <Brief task={task} />}
+                  {tab === "Funding" && <FundingPanel key={id} id={id} api={api} />}
+                  {tab === "Evidence" && (
+                    <EvidencePanel key={id} id={id} revision={row.stateRevision} api={api} />
+                  )}
+                </div>
+              </div>
+              <aside className="task-details" aria-label="Task details">
                 {task.summary.request && <p>{task.summary.request}</p>}
                 {task.goal !== (task.repository ? task.summary.issue : label(task)) && <p>{task.goal}</p>}
-              </div>
-              <section className="reading" aria-label="Task summary">
-                <h3>Work done</h3>
-                <ul>{task.summary.work.map((line, i) => <li key={i}>{line}</li>)}</ul>
-                <h3>Checks and review</h3>
-                <ul>{task.summary.checks.map((line, i) => <li key={i}>{line}</li>)}</ul>
-              </section>
-              <dl className="facts">
-                <div>
-                  <dt>Owner</dt>
-                  <dd>
-                    Lifecycle owner <code>{task.ownerId.slice(0, 8)}</code>
-                  </dd>
-                </div>
-                <div>
-                  <dt>Phase</dt>
-                  <dd>{task.phase}</dd>
-                </div>
-                <div>
-                  <dt>Active worker</dt>
-                  <dd>
-                    {task.run
-                      ? {
-                          Planning: "Planner",
-                          Implementation: "Implementer",
-                          Verification: "Verifier",
-                          Review: "Reviewer",
-                          Delivery: "Delivery worker",
-                        }[task.run.phase]
-                      : "None"}
-                  </dd>
-                </div>
-              </dl>
-              <div className="next">
-                <strong>Next action</strong>
-                <span>{task.nextAction}</span>
-              </div>
-              {task.repository && (
-                <section className="reading" aria-label="Repository delivery">
-                  <h3>Repository delivery</h3>
-                  <p>
-                    {task.repository.repository} ·{" "}
-                    <a href={task.repository.issueUrl}>Issue #{task.repository.number}</a> · Base{" "}
-                    <code>{task.repository.baseSha.slice(0, 12)}</code>
-                  </p>
-                  {task.repository.eligibility !== "Eligible" && <p>{task.repository.eligibility}</p>}
-                  {task.repository.problem && <p role="status">{task.repository.problem}</p>}
-                  {task.repository.requiresReconciliation && (
-                    <button disabled={!ready} onClick={async () => {
-                      try {
-                        await api("github/issues/" + task.repository!.number + "/sync", {body:{}});
-                        update();
-                      } catch (error) { setCommandError((error as Error).message); }
-                    }}>Reconcile original publication</button>
-                  )}
-                  {task.repository.draft ? (
-                    <p>
-                      <a href={task.repository.draft.url}>View PR #{task.repository.draft.number}</a>
-                      {" · "}
-                      <code>{task.repository.draft.headSha.slice(0, 12)}</code>
-                    </p>
-                  ) : (
-                    task.repository.awaitingConfirmation && (
-                      <p>Awaiting GitHub confirmation of the original Draft PR request.</p>
-                    )
-                  )}
-                  {task.revisionAvailable && <ReviseRound key={task.id} task={task} ready={ready} api={api} update={update} />}
-                  {!!task.previousDrafts?.length && <details><summary>Earlier deliveries</summary><ul>
-                    {task.previousDrafts.map(pr=><li key={pr.number}><a href={pr.url}>PR #{pr.number}</a> · <code>{pr.headSha.slice(0,12)}</code></li>)}
-                  </ul></details>}
-                  {catalog?.issueActions && task.repository.draft && task.activity === "Delivered" &&
-                    <IssueActions key={task.id + task.repository.draft.headSha} task={task} api={api} ready={ready} update={update} />}
+                <section className="reading" aria-label="Task summary">
+                  <h3>Work done</h3>
+                  <ul>{task.summary.work.map((line, i) => <li key={i}>{line}</li>)}</ul>
+                  <h3>Checks and review</h3>
+                  <ul>{task.summary.checks.map((line, i) => <li key={i}>{line}</li>)}</ul>
                 </section>
-              )}
-              {detailError && <p role="alert">{detailError} · Reconnecting…</p>}
-              {task.writerRestart && <WriterRecovery key={task.recovery?.operationId} task={task} api={api} ready={ready} update={update} />}
-              {task.recovery && !task.writerRestart && (
-                <RecoverOperation
-                  key={task.recovery.operationId}
-                  id={id}
-                  recovery={task.recovery}
-                  api={api}
-                  ready={ready}
-                  changed={update}
-                />
-              )}
-              {task.activity === "Waiting" && task.advice && (
-                <section className="decision" aria-label="Pending decision">
-                  <div className="eyeline">Decision needed</div>
-                  <h2>{task.question?.text}</h2>
-                  <ExpertAdvice advice={task.advice} />
-                  <div className="actions">
-                    {task.choices.map((c, i) => (
-                      <button
-                        disabled={!ready || busy}
-                        key={c.value}
-                        className={i === 0 ? "" : "secondary"}
-                        onClick={() => decide(c.value)}
-                      >
-                        {c.label}
-                      </button>
-                    ))}
+                <dl className="facts">
+                  <div>
+                    <dt>Owner</dt>
+                    <dd>
+                      Lifecycle owner <code>{task.ownerId.slice(0, 8)}</code>
+                    </dd>
                   </div>
-                </section>
-              )}
-              {task.activity === "Waiting" && commandError && <p role="alert">{commandError}</p>}
-              <nav className="tabs" aria-label="Task views">
-                {(["Conversation", "Brief", "Evidence", "Funding"] as const).map((t) => (
-                  <button key={t} aria-current={tab === t ? "page" : undefined} onClick={() => setTab(t)}>
-                    {t}
-                  </button>
-                ))}
-              </nav>
-              {tab === "Conversation" && (
-                <Conversation key={id} task={task} api={api} ready={ready} changed={update} />
-              )}
-              {tab === "Brief" && <Brief task={task} />}
-              {tab === "Funding" && <FundingPanel key={id} id={id} api={api} />}
-              {tab === "Evidence" && (
-                <EvidencePanel key={id} id={id} revision={row.stateRevision} api={api} />
-              )}
+                  <div>
+                    <dt>Phase</dt>
+                    <dd>{task.phase}</dd>
+                  </div>
+                  <div>
+                    <dt>Active worker</dt>
+                    <dd>
+                      {task.run
+                        ? {
+                            Planning: "Planner",
+                            Implementation: "Implementer",
+                            Verification: "Verifier",
+                            Review: "Reviewer",
+                            Delivery: "Delivery worker",
+                          }[task.run.phase]
+                        : "None"}
+                    </dd>
+                  </div>
+                </dl>
+                <div className="next">
+                  <strong>Next action</strong>
+                  <span>{task.nextAction}</span>
+                </div>
+                {task.repository && (
+                  <section className="reading" aria-label="Repository delivery">
+                    <h3>Repository delivery</h3>
+                    <p>
+                      {task.repository.repository} ·{" "}
+                      <a href={task.repository.issueUrl} target="_blank" rel="noopener noreferrer">Issue #{task.repository.number}</a> · Base{" "}
+                      <code>{task.repository.baseSha.slice(0, 12)}</code>
+                    </p>
+                    {task.repository.eligibility !== "Eligible" && <p>{task.repository.eligibility}</p>}
+                    {task.repository.problem && <p role="status">{task.repository.problem}</p>}
+                    {task.repository.requiresReconciliation && (
+                      <button disabled={!ready} onClick={async () => {
+                        try {
+                          await api("github/issues/" + task.repository!.number + "/sync", {body:{}});
+                          update();
+                        } catch (error) { setCommandError((error as Error).message); }
+                      }}>Reconcile original publication</button>
+                    )}
+                    {task.repository.draft ? (
+                      <p>
+                        <a href={task.repository.draft.url} target="_blank" rel="noopener noreferrer">View PR #{task.repository.draft.number}</a>
+                        {" · "}
+                        <code>{task.repository.draft.headSha.slice(0, 12)}</code>
+                      </p>
+                    ) : (
+                      task.repository.awaitingConfirmation && (
+                        <p>Awaiting GitHub confirmation of the original Draft PR request.</p>
+                      )
+                    )}
+                    {task.revisionAvailable && <ReviseRound key={task.id} task={task} ready={ready} api={api} update={update} />}
+                    {!!task.previousDrafts?.length && <details><summary>Earlier deliveries</summary><ul>
+                      {task.previousDrafts.map(pr=><li key={pr.number}><a href={pr.url} target="_blank" rel="noopener noreferrer">PR #{pr.number}</a> · <code>{pr.headSha.slice(0,12)}</code></li>)}
+                    </ul></details>}
+                    {catalog?.issueActions && task.repository.draft && task.activity === "Delivered" &&
+                      <IssueActions key={task.id + task.repository.draft.headSha} task={task} api={api} ready={ready} update={update} />}
+                  </section>
+                )}
+                {detailError && <p role="alert">{detailError} · Reconnecting…</p>}
+                {task.writerRestart && <WriterRecovery key={task.recovery?.operationId} task={task} api={api} ready={ready} update={update} />}
+                {task.recovery && !task.writerRestart && (
+                  <RecoverOperation
+                    key={task.recovery.operationId}
+                    id={id}
+                    recovery={task.recovery}
+                    api={api}
+                    ready={ready}
+                    changed={update}
+                  />
+                )}
+                {task.activity === "Waiting" && task.advice && (
+                  <section className="decision" aria-label="Pending decision">
+                    <div className="eyeline">Decision needed</div>
+                    <h2>{task.question?.text}</h2>
+                    <ExpertAdvice advice={task.advice} />
+                    <div className="actions">
+                      {task.choices.map((c, i) => (
+                        <button
+                          disabled={!ready || busy}
+                          key={c.value}
+                          className={i === 0 ? "" : "secondary"}
+                          onClick={() => decide(c.value)}
+                        >
+                          {c.label}
+                        </button>
+                      ))}
+                    </div>
+                  </section>
+                )}
+                {task.activity === "Waiting" && commandError && <p role="alert">{commandError}</p>}
+              </aside>
             </article>
           )}
         </div>
