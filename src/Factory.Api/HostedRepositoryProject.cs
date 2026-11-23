@@ -33,10 +33,10 @@ public sealed class HostedRepositoryProject : IControlledProject
         [Goal], ["Write only " + string.Join(", ", layout.Writable) + "."]),
         [SourceDocument.Capture(SourcePart.Source, layout.Source, source), SourceDocument.Capture(SourcePart.Decisions, layout.Decisions, source),
          SourceDocument.Capture(SourcePart.Cases, layout.Cases, source), .. (layout.AdditionalWrites ?? []).Select(path => SourceDocument.Capture(SourcePart.Source, path, source))]);
-    public ProjectBrief FollowUpBrief(SourcePacket source)
+    public ProjectBrief FollowUpBrief(SourcePacket source, string objective)
     {
         var original = Describe(source);
-        if (Ci.Rules.Revision is not null) return original;
+        if (Ci.Rules.Revision is not null) return original with { Requirements = original.Requirements with { Constraints = [objective] } };
         var checks = original.Requirements.Criteria.Select(c => c.Id == "bounded-source" ? c :
             c with { Text = $"Pass the installed {c.Id} check." }).ToArray();
         return original with { Requirements = new(checks, ["Use the installed verifier."], original.Requirements.Exclusions) };

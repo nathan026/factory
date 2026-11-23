@@ -124,6 +124,7 @@ class IssuePickerTest(unittest.TestCase):
         self.assertEqual(polled["origin"]["policyHash"],request["policyHash"])
         task, = self.invoke("tasks")
         self.assertEqual(task["goal"],request["goal"])
+        self.assertEqual(task["memory"]["briefs"][-1]["requirements"]["constraints"],[request["goal"]])
         self.assertEqual(task["phase"],"Planning")
         self.assertEqual(task["followUp"]["taskId"],task_id)
         self.assertEqual(json.loads(next(self.approvals.glob("*.json")).read_text()),task["followUp"])

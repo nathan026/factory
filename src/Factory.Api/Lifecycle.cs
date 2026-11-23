@@ -12,7 +12,7 @@ public sealed class Lifecycle(IControlledProject project, CiProfile? ciProfile =
         if (!project.ExpertProfile.Valid()) throw new CommandConflict("Invalid expert profile.");
         var task = new WorkItem { Id = id, OwnerId = prior?.OwnerId ?? Guid.NewGuid(), FollowUp = followUp, OpenedAt = prior?.OpenedAt ?? DateTimeOffset.UtcNow, OpeningMessage = openingMessage, Scenario = scenario, Goal = followUp?.Scope ?? project.Goal, Source = source ?? project.Snapshot(),
             ContractVersion = ContractGate.Version, GateRule = GateEvaluation.Rule, Policy = project.Policy, ExpertRuntime = expertRuntime, OwnerRuntime = ownerRuntime, ExpertProfile = project.ExpertProfile };
-        var brief = followUp is not null && project is HostedRepositoryProject hosted ? hosted.FollowUpBrief(task.Source) : project.Describe(task.Source);
+        var brief = followUp is not null && project is HostedRepositoryProject hosted ? hosted.FollowUpBrief(task.Source, followUp.Scope) : project.Describe(task.Source);
         task.Memory = OwnerMemory.Initialize(task, brief, legacy: false);
         if (prior is not null)
         {
