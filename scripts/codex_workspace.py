@@ -126,7 +126,7 @@ fs.writeFileSync('/work/candidate-pack.json',JSON.stringify(packed),{flag:'wx',m
 
 
 @contextmanager
-def open_workspace(leases, order, git_commit, on_release=None, expert_session=None, request_hash=None):
+def open_workspace(leases, order, git_commit, on_release=None, expert_session=None, request_hash=None, lease_deadline=None):
     if order["action"] in ("Consult","Discuss","AnswerWorker"):
         owner = order["action"] in ("Discuss","AnswerWorker")
         role = "owner" if owner else "expert"
@@ -168,7 +168,8 @@ def open_workspace(leases, order, git_commit, on_release=None, expert_session=No
         else:
             files["candidate.json"] = restored
     leases.reconcile()
-    generation = leases.acquire(a["taskId"],a["runId"],role,order["action"],order["context"]["blueprint"]["manifestHash"],files)
+    ttl = 90 if lease_deadline is None else 300
+    generation = leases.acquire(a["taskId"],a["runId"],role,order["action"],order["context"]["blueprint"]["manifestHash"],files,ttl=ttl,expires_by=lease_deadline)
     try:
         yield Workspace(leases,generation,role,a["sourceHash"],git_commit,paths,candidate is not None,project_files["Source"][2],
                         layout.get("additionalWrites",[]) if layout else [])

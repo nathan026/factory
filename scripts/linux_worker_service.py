@@ -5,6 +5,7 @@ import select
 import signal
 import subprocess
 import sys
+import time
 from threading import Thread
 from uuid import UUID
 
@@ -12,7 +13,7 @@ from uuid import UUID
 # separately narrows the environment passed to the CLI and its metadata probe.
 SERVICE_ENV = ("PATH", "HOME", "CODEX_HOME", "XDG_RUNTIME_DIR", "DOCKER_HOST",
                "DOCKER_CONTEXT", "DOCKER_CONFIG", "FACTORY_CONTROLLER_RELEASE", "FACTORY_FOLLOWUP_APPROVALS",
-               "FACTORY_LEASE_DB", "FACTORY_MAX_LEASES", "FACTORY_OPERATION_TIMING")
+               "FACTORY_LEASE_DB", "FACTORY_MAX_LEASES", "FACTORY_OPERATION_TIMING", "FACTORY_CODING_END_MS")
 
 
 def process_identity(pid):
@@ -65,9 +66,15 @@ def supervise(argv):
     env = [key + "=" + os.environ[key] for key in SERVICE_ENV if key in os.environ]
     # exec preserves the bridge's stdin/stdout. The unit's main process owns the
     # attempt; systemd retires even detached descendants if that process dies.
+    runtime_seconds = 75
+    if "FACTORY_CODING_END_MS" in os.environ:
+        remaining = int(os.environ["FACTORY_CODING_END_MS"]) // 1000 - int(time.time())
+        if not 3 <= remaining <= 300:
+            raise RuntimeError("Coding service deadline is expired or outside the deployment limit")
+        runtime_seconds = remaining - 2  # Reserve the configured cgroup stop grace.
     os.execv("/usr/bin/systemd-run", ["systemd-run", "--user", "--quiet", "--wait", "--pipe",
         "--collect", "--service-type=exec", "--unit=" + unit, "--expand-environment=no",
         "--property=KillMode=control-group", "--property=SendSIGKILL=yes",
-        "--property=TimeoutStopSec=2s", "--property=RuntimeMaxSec=75s",
+        "--property=TimeoutStopSec=2s", f"--property=RuntimeMaxSec={runtime_seconds}s",
         "--property=NoNewPrivileges=yes", "--property=UMask=0077",
         "/usr/bin/env", "-i", *env, sys.executable, str(Path(argv[0]).resolve()), *argv[1:], "--systemd-worker", *identities])

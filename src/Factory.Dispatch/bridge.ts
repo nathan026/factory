@@ -9,7 +9,7 @@ import { Hatchet, IdempotencyCollisionError, type JsonObject } from "@hatchet-de
 
 type Ticket = { id: string | null, schedulerId: string | null };
 type Delivery = { token: string, output: JsonObject };
-type Claim = { token: string, order: JsonObject, workerMode: "codex-subscription" | "controlled" };
+type Claim = { token: string, order: JsonObject, workerMode: "codex-subscription" | "controlled", codingSeconds?: number | null };
 
 const hatchet = Hatchet.init();
 const api = process.env.FACTORY_CONTROLLER_URL ?? "http://127.0.0.1:5187";
@@ -44,9 +44,9 @@ function childJson(binary: string, args: string[], input: unknown, env: NodeJS.P
     });
 }
 
-const executionSeconds = 60; // The installed Hatchet execution limit, shared with the native supervisor.
+const executionSeconds = 60; // Default for the shared Hatchet task; only an admitted coding claim may extend it.
 
-async function execute({order, workerMode}: Claim, signal: AbortSignal, deadline: number, sessionId: string): Promise<JsonObject> {
+async function execute({order, workerMode, codingSeconds}: Claim, signal: AbortSignal, deadline: number, sessionId: string): Promise<JsonObject> {
     // The deterministic proposal and review metadata use the existing fixture contracts.
     const env = Object.fromEntries(Object.entries(process.env).filter(([key]) =>
         ["path", "systemroot", "temp", "tmp", "dotnet_root", "factory_followup_approvals"].includes(key.toLowerCase())));
@@ -74,7 +74,18 @@ async function execute({order, workerMode}: Claim, signal: AbortSignal, deadline
             const live = fileURLToPath(new URL("../../scripts/codex_worker.py", import.meta.url));
             const authEnv = Object.fromEntries(Object.entries(process.env).filter(([key]) =>
                 ["codex_home","xdg_runtime_dir","windir","comspec","pathext","systemdrive","homedrive","homepath","programdata","programfiles","programfiles(x86)"].includes(key.toLowerCase())));
-            const reply = await childJson(python, [live, cancelled, String(deadline), sessionId], order, {...providerEnv,...authEnv, FACTORY_OPERATION_TIMING:process.env.FACTORY_OPERATION_TIMING}, 90000);
+            const codingEnv: NodeJS.ProcessEnv = {};
+            let nativeDeadline = deadline;
+            let childTimeout = 90000;
+            if (codingSeconds != null) {
+                // Keep time for sealing, release, and return to Hatchet inside the same absolute limit.
+                nativeDeadline -= Math.min(20, Math.floor(codingSeconds / 6)) * 1000;
+                if (Date.now() >= nativeDeadline) return { wait: "Coding timeout", fundingMode: "Subscription" };
+                codingEnv.FACTORY_CODING_END_MS = String(deadline);
+                childTimeout = Math.max(1, deadline - Date.now());
+            }
+            const reply = await childJson(python, [live, cancelled, String(nativeDeadline), sessionId], order,
+                {...providerEnv,...authEnv,...codingEnv, FACTORY_OPERATION_TIMING:process.env.FACTORY_OPERATION_TIMING}, childTimeout);
             signal.throwIfAborted();
             return reply;
         } finally {
@@ -93,10 +104,18 @@ const task = hatchet.task({
     name: "factory-controlled-operation-v1", retries: 0, executionTimeout: `${executionSeconds}s`,
     idempotency: { strategy: "ttl", expression: "input.id", ttlMs: 86400000 },
     fn: async (input: { id: string }, ctx) => {
-        const deadline = Date.now() + executionSeconds * 1000;
+        const admittedAt = Date.now();
         const sessionId = randomUUID();
         const { claim } = await post<{ claim: Claim | null }>(input.id + "/claim", { runId: ctx.workflowRunId(), sessionId });
         if (!claim) throw new Error("Operation has no available execution claim.");
+        const seconds = claim.codingSeconds ?? executionSeconds;
+        if (claim.codingSeconds != null &&
+            (claim.workerMode !== "codex-subscription" || !["Implement","Review"].includes(String(claim.order.action)) ||
+             !Number.isInteger(seconds) || seconds < executionSeconds || seconds > 300))
+            throw new Error("Invalid coding deadline on dispatch claim.");
+        if (seconds > executionSeconds)
+            await ctx.refreshTimeout(`${seconds - executionSeconds}s`);
+        const deadline = admittedAt + seconds * 1000;
         const started = Date.now();
         try {
             return { token: claim.token, ...await execute(claim, ctx.abortController.signal, deadline, sessionId) };

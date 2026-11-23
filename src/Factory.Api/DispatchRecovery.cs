@@ -14,8 +14,8 @@ public sealed partial class TaskStore
     private const string ExpiredClaim = "Worker claim expired without a recorded result. Its execution requires reconciliation.";
     private long Deadline() => DateTimeOffset.UtcNow.AddSeconds(stallSeconds).ToUnixTimeSeconds();
 
-    private void AdvanceDeadline(Session s, string id) =>
-        s.Execute("UPDATE dispatch_watch SET deadline=@deadline WHERE id=@id", ("deadline", Deadline()), ("id", id));
+    private void AdvanceDeadline(Session s, string id, int? seconds = null) =>
+        s.Execute("UPDATE dispatch_watch SET deadline=@deadline WHERE id=@id", ("deadline", DateTimeOffset.UtcNow.AddSeconds(seconds ?? stallSeconds).ToUnixTimeSeconds()), ("id", id));
 
     private static bool IsHeld(Session s, string id) =>
         s.Text("SELECT id FROM dispatch_holds WHERE id=@id", ("id", id)) is not null;
@@ -129,6 +129,7 @@ public sealed partial class TaskStore
             "Authentication" => "Restore the runtime sign-in before resuming this task.",
             "Quota" => "Wait for the runtime allowance to reset before resuming this task.",
             "Budget" => "Resolve the runtime allocation before resuming this task.",
+            "Coding timeout" => "The coding session reached its time limit. It returned no accepted result. Inspect the attempt before resuming.",
             _ => throw new BadHttpRequestException("Unsupported runtime wait.")
         };
         var raw = s.Text("""
@@ -138,7 +139,11 @@ public sealed partial class TaskStore
         if (raw is null) throw new CommandConflict("The runtime wait has no active claim.");
         var committed = JsonSerializer.Deserialize<WorkOrder>(raw, Wire.Json)!;
         var native = RequiresSubscription(committed);
-        var subscription = native || body.FundingMode == "Subscription";
+        bool codingTimeout = body.Kind == "Coding timeout";
+        if (codingTimeout && (!native || body.FundingMode != "Subscription" ||
+            committed.Action is not (WorkAction.Implement or WorkAction.Review)))
+            throw new CommandConflict("Only a subscription coding session can report a coding timeout.");
+        var subscription = !codingTimeout && (native || body.FundingMode == "Subscription");
         if (subscription && body.Kind == "Budget")
             throw new CommandConflict("A subscription operation cannot report an API budget wait.");
         if (committed.Action == WorkAction.Discuss)
@@ -154,7 +159,7 @@ public sealed partial class TaskStore
         if (kind == body.Kind)
         {
             var tagged = s.Text("SELECT id FROM subscription_waits WHERE id=@id", ("id",id)) is not null;
-            if ((tagged || native) == subscription) return true;
+            if (codingTimeout || (tagged || native) == subscription) return true;
             throw new CommandConflict("Runtime wait already has a different funding mode.");
         }
         if (kind is not null) throw new CommandConflict("This operation already has a different outcome.");

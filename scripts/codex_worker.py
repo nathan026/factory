@@ -181,12 +181,16 @@ def turn(workspace, url, bearer, env, order, bindings, cancel, on_transcript=Non
                     while proc.poll() is None:
                         if stdout.done():
                             stdout.result()
+                        if time.time()>=deadline and workspace.role in ("writer","reviewer") and "FACTORY_CODING_END_MS" in os.environ:
+                            raise RuntimeWait("Coding timeout")
                         if retired(cancel) or time.time()>=deadline or workspace.leases.record(workspace.generation)["state"]!="active":
                             raise RuntimeError("Native turn interrupted or expired")
                         try:
                             proc.wait(timeout=0.5)
                         except subprocess.TimeoutExpired:
                             pass
+                    if "FACTORY_CODING_END_MS" in os.environ and time.time() >= deadline:
+                        raise RuntimeWait("Coding timeout")
                     out, err = stdout.result(), stderr.result()
                     if proc.returncode:
                         reason = (err+out).lower()
@@ -216,6 +220,11 @@ def run(order,cancel,dispatch_deadline,session=None):
     discussion_or_expert = owner or expert
     if not discussion_or_expert and ((order["assignment"]["policyVersion"] != PROFILE and repository_rules(order) is None) or order["action"] not in ("Implement","Review")):
         raise ValueError("Unsupported live assignment")
+    hard_end = None
+    if "FACTORY_CODING_END_MS" in os.environ:
+        hard_end = int(os.environ["FACTORY_CODING_END_MS"]) / 1000
+        if discussion_or_expert or not dispatch_deadline < hard_end <= time.time() + 300:
+            raise ValueError("Invalid native coding deadline")
     env = environment()
     a = order["assignment"]
     bound = subprocess.run([*controller_command(),"--codex-bindings"],input=json.dumps(order).encode(),capture_output=True,timeout=8)
@@ -240,7 +249,13 @@ def run(order,cancel,dispatch_deadline,session=None):
             with trace.open("a", encoding="utf-8") as file:
                 print(json.dumps({"run":run_id,"generation":generation,"stage":name,"at":time.time()}),file=file)
     def check_dispatch():
-        if time.time() >= dispatch_deadline or retired(cancel):
+        # After the model stops, the adapter can use its reserved time to snapshot,
+        # seal and release. A retired launcher can never use that reserve.
+        if retired(cancel):
+            raise RuntimeError("Retired dispatch")
+        if hard_end is not None and time.time() >= hard_end - 4:
+            raise RuntimeWait("Coding timeout")
+        if hard_end is None and time.time() >= dispatch_deadline:
             raise RuntimeError("Retired dispatch")
     try:
         check_dispatch()
@@ -250,8 +265,10 @@ def run(order,cancel,dispatch_deadline,session=None):
         if wait:
             raise RuntimeWait(wait)
         check_dispatch()
+        if hard_end is not None and time.time() >= dispatch_deadline:
+            raise RuntimeWait("Coding timeout")
         leases = Leases()
-        with open_workspace(leases,order,bindings.get("gitRevision"),on_release=stage,expert_session=session,request_hash=policy) as workspace:
+        with open_workspace(leases,order,bindings.get("gitRevision"),on_release=stage,expert_session=session,request_hash=policy,lease_deadline=hard_end) as workspace:
             generation = workspace.generation
             with db:
                 db.execute("UPDATE codex_attempts SET status='running',generation=? WHERE run=?",(workspace.generation,run_id))
@@ -269,6 +286,8 @@ def run(order,cancel,dispatch_deadline,session=None):
                     if updated.rowcount != 1:
                         raise RuntimeError("Native session already bound or retired")
             workspace.observe = record_tool
+            if hard_end is not None and time.time() >= dispatch_deadline:
+                raise RuntimeWait("Coding timeout")
             with tool_server(workspace.dispatch) as (url,bearer):
                 thread,reply,usage = turn(workspace,url,bearer,env,order,bindings,cancel,record_thread,dispatch_deadline)
                 stage("native.completed")
