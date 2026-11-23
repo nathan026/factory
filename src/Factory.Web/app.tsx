@@ -336,9 +336,16 @@ function Desk({ api, signOut }: { api: Api; signOut: () => void }) {
                   <code>TASK / {id.slice(0, 8)}</code>
                   <span className={"status " + task.activity}>{status(task)}</span>
                 </div>
-                <h1>{label(task)}</h1>
-                <p>{task.goal}</p>
+                <h1>{task.repository ? task.summary.issue : label(task)}</h1>
+                {task.summary.request && <p>{task.summary.request}</p>}
+                {task.goal !== (task.repository ? task.summary.issue : label(task)) && <p>{task.goal}</p>}
               </div>
+              <section className="reading" aria-label="Task summary">
+                <h3>Work done</h3>
+                <ul>{task.summary.work.map((line, i) => <li key={i}>{line}</li>)}</ul>
+                <h3>Checks and review</h3>
+                <ul>{task.summary.checks.map((line, i) => <li key={i}>{line}</li>)}</ul>
+              </section>
               <dl className="facts">
                 <div>
                   <dt>Owner</dt>

@@ -25,6 +25,22 @@ if (args is ["--check-scoped-tree", var localUrl])
     return;
 }
 
+// The report uses admitted issue text and actual file bytes. Issue markup stays inert in a Draft.
+var oldSheet = "button {\n  background: #20543e;\n  color: #fff;\n}\n.mark i {\n  background: #b9df92;\n}";
+var newSheet = oldSheet.Replace("#20543e", "#E86100").Replace("#fff", "#000").Replace("#b9df92", "#E86100");
+var reportTask = new WorkItem { Id = Guid.NewGuid(), Scenario = "report", Goal = "Change the primary colour.",
+    OpeningMessage = "Change the primary colour\n\n<details> @operator", Source = new(oldSheet, "", "") };
+var pendingReport = DeliverySummary.From(reportTask, "desk.css", null, true);
+if (pendingReport.Markdown().Contains("<details>") || pendingReport.Markdown().Contains("@operator") ||
+    !pendingReport.Checks.Contains("Verification is pending.")) throw new Exception("Unsafe or premature task summary.");
+reportTask.Candidate = newSheet;
+var cssReport = DeliverySummary.From(reportTask, "desk.css", null, true);
+if (!cssReport.Work.Contains("For button, the factory changed color from #fff to #000.") ||
+    !cssReport.Work.Contains("For .mark i, the factory changed background from #b9df92 to #E86100.") ||
+    cssReport.Work.Length != 4 || !cssReport.Checks.Contains("Verification is pending."))
+    throw new Exception("The report must describe the actual edits and wait for verification.");
+Console.WriteLine("Passed: issue text, three scoped CSS edits and pending checks in the shared summary");
+
 // These are contract tests. They never submit native output into the lifecycle.
 var checkout = new SampleRuntime("checkout-scope/v1");
 var checkoutOwner = new Lifecycle(checkout, checkout.Ci);
