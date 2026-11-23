@@ -26,7 +26,8 @@ if (args is ["--check-scoped-tree", var localUrl])
     if (project.CandidateError(candidate) is not null) throw new InvalidDataException("Invalid scoped candidate.");
     var origin = new IssueOrigin(localUrl,config.RepositoryId,config.Repository,1,1,"main",revision,pinnedTree.Tree,
         pinnedTree.Source.Fingerprint(),pinnedTree.Path,"known-decision","contract-test");
-    var intent = new DraftIntent(Guid.NewGuid(),"unused","unused",candidate,Wire.Digest(candidate),Guid.NewGuid(),Guid.NewGuid(),"unit",DateTimeOffset.UtcNow);
+    var taskId = Guid.NewGuid();
+    var intent = new DraftIntent(taskId,$"factory/{taskId:N}","unused",candidate,Wire.Digest(candidate),Guid.NewGuid(),Guid.NewGuid(),"unit",DateTimeOffset.UtcNow);
     Console.WriteLine(await git.BuildCommit(origin,intent));
     return;
 }
