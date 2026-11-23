@@ -176,6 +176,16 @@ class GitHubTest(unittest.TestCase):
         gh.hide_pulls = False
         pr, = gh.pulls
         self.assertEqual(pr["title"], "Reviewed fixture change for issue #1")
+        summary = self.controller.api(f"tasks/{task['id']}/workspace")["summary"]
+        self.assertEqual(summary["issue"], "Boundary correction 1")
+        self.assertEqual(summary["request"], gh.issues[1]["body"])
+        self.assertIn("The factory changed shipping-rule.json.", summary["work"])
+        self.assertTrue(any("greater" in line for line in summary["work"]))
+        self.assertIn("The independent reviewer approved these changes.", summary["checks"])
+        for heading in ("## Issue", "## Work done", "## Checks and review", "## Next action"):
+            self.assertLess(pr["body"].index(heading), pr["body"].index("<details>"))
+        self.assertIn(summary["request"], pr["body"])
+        self.assertIn(summary["work"][0], pr["body"])
         self.assertIn("Controlled fixture evidence. Local GitHub fixture.",pr["body"])
         self.assertNotIn("Codex",pr["body"])
         original = deepcopy(pr)

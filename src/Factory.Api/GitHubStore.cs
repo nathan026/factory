@@ -8,7 +8,11 @@ public record IssueOrigin(string ApiUrl, long RepoId, string Repository, int Num
 public record DraftIntent(Guid TaskId, string Branch, string Marker, string Candidate, string CandidateHash,
     Guid Verifier, Guid Reviewer, string GateHash, DateTimeOffset OpenedAt,
     [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
-    CiPublication? Ci = null);
+    CiPublication? Ci = null)
+{
+    [System.Text.Json.Serialization.JsonIgnore]
+    public DeliverySummary? Summary { get; init; }
+}
 public record CiPublication(Guid ExecutionId, string PolicyHash, string Environment, string ReceiptHash);
 public record DraftReceipt(int Number, string Url, string HeadSha);
 public record RepositoryDeliveryInfo(string Repository, int Number, string IssueUrl, string BaseSha, string Eligibility, bool AwaitingConfirmation, DraftReceipt? Draft, string? Problem, bool RequiresReconciliation);
@@ -88,7 +92,7 @@ public sealed partial class TaskStore
             ("id", task.Id.ToString()), ("intent", Encode(intent)));
         if (s.Text("SELECT intent FROM github_publications WHERE task_id=@id", ("id", task.Id.ToString())) != Encode(intent))
             throw new CommandConflict("The sealed publication intent differs from the task.");
-        return intent;
+        return intent with { Summary = DeliverySummary.From(task, origin.Path, ciProfile?.Rules.RepositoryLayout, true) };
     });
 
     private static DraftIntent QualifyCandidate(Session s, WorkItem task, IssueOrigin origin)

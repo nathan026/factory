@@ -375,12 +375,14 @@ public sealed class GitHubRepository : IDisposable
         var evidence = subscriptionWorkers ? "Subscription-backed Codex implementation and review." : "Controlled fixture evidence.";
         var transport = http.BaseAddress!.IsLoopback ? "Local GitHub fixture." : "Hosted GitHub delivery.";
         var title = subscriptionWorkers ? $"Reviewed Codex change for issue #{origin.Number}" : $"Reviewed fixture change for issue #{origin.Number}";
-        var body = string.Join("\n", intent.Marker, "", $"Related issue #{origin.Number}.",
+        var summary = intent.Summary ?? throw new InvalidOperationException("Missing qualified task summary.");
+        var body = string.Join("\n", intent.Marker, "", summary.Markdown(), "", "<details>", "<summary>Factory evidence</summary>", "", $"Related issue #{origin.Number}.",
             $"Pinned base: {origin.BaseSha}", $"Candidate SHA-256: {intent.CandidateHash}",
             $"Passing verifier: {intent.Verifier}", $"{reviewer}: {intent.Reviewer}",
             $"Review gate SHA-256: {intent.GateHash}", $"{evidence} {transport} Hosted checks and human review pending.");
         if (intent.Ci is { } ci)
             body += $"\nLocal CI execution: {ci.ExecutionId}\nProject policy SHA-256: {ci.PolicyHash}\nEnvironment: {ci.Environment}\nProvider receipt SHA-256: {ci.ReceiptHash}";
+        body += "\n\n</details>";
         var pull = new { title, head = intent.Branch, @base = config.BaseBranch, body, draft = true, maintainer_can_modify = false };
         if (origin.LocalJournal is not null && !http.BaseAddress!.IsLoopback) throw new CommandConflict("Local publication required.");
         var pr = origin.LocalJournal is not null

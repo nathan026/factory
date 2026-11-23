@@ -17,6 +17,9 @@ try {
       .locator(".task-heading")
       .getByText("Draft PR #" + number)
       .waitFor();
+    const summary = page.getByRole("region", { name: "Task summary" });
+    await summary.getByText("The factory changed shipping-rule.json.").waitFor();
+    await summary.getByText("The independent reviewer approved these changes.").waitFor();
     const delivery = page.getByRole("region", { name: "Repository delivery" });
     const link = delivery.getByRole("link", { name: "View PR #" + number });
     assert.equal(await link.getAttribute("href"), url);

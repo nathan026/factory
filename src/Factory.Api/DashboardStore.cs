@@ -69,6 +69,8 @@ public sealed partial class TaskStore
         return new { task.Id, task.Goal, task.OwnerId, task.Phase, task.Activity, task.Scenario, task.OpenedAt,
             nextAction = repository?.Draft is null ? owner.NextAction : "Inspect the Draft PR and hosted checks",
             draftNumber = repository?.Draft?.Number, run = task.Run is { } run ? new { run.RunId, run.Phase } : null, task.History, messages, brief = memory.Briefs[^1],
+            summary = DeliverySummary.From(task, memory.Documents.First(d => d.Part == SourcePart.Source).Path,
+                ciProfile?.Rules.RepositoryLayout, repository is not null),
             recovery, repository, decisions = memory.Decisions, task.Question, task.Advice, task.HumanChoice,
             questionKey = QuestionKey(task), choices = task.Activity == Activity.Waiting ? lifecycle.Choices(task) : [] };
     });

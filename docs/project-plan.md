@@ -4,6 +4,12 @@ The lifecycle owner takes each admitted task from requirements to a verified can
 
 The identifiers below link requirements, work packages and acceptance tests. They describe the intended behavior. Qualification results belong to the deployment where the checks ran.
 
+### Issue and work summaries
+
+The task desk shows the request, completed changes, verification results and the next action on the main task view. Each new Draft PR shows the same work and check results above the publication evidence. Report outcomes for the current candidate. Keep the issue author's wording distinct from factory findings. Keep file names, values and check names exact.
+
+Use ASD-STE100 descriptive writing guidance for factory-authored text. Use one term for each concept. Write one topic per paragraph. Give each sentence one subject and use at most 25 words in a descriptive sentence. Use direct instructions for the operator's next action. Preserve source quotations and identifiers as evidence. [ASD-STE100, Issue 9, sections 5 and 6](https://www.asd-ste100.org/assets/files/ASD-STE100_ISSUE9.pdf)
+
 ## Functional requirements
 
 | ID | Requirement | Behavior |

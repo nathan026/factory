@@ -20,6 +20,7 @@ export type GitHubIntake = {
 export type Catalog = { restorePaused: boolean; goal: string; scenarios: { id: string; label: string }[]; githubIntake?: GitHubIntake | null };
 export type Exchange = { id: string; afterEntry: number; text: string; reply: string; sentAt: string };
 export type Workspace = Task & {
+  summary: { issue: string; request: string | null; work: string[]; checks: string[] };
   recovery: {
     operationId: string;
     gateSequence: number;
