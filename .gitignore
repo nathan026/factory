@@ -10,6 +10,7 @@ __pycache__/
 .env.*
 .codex/
 auth.json
+*.pem
 *.sqlite*
 *.bundle
 docs/fct018-readiness.json

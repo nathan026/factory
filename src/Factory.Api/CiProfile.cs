@@ -36,13 +36,16 @@ public record RepositoryLayout(string Source, string Decisions, string Cases, st
                    && !paths.Any(other => other.StartsWith(p + "/", StringComparison.OrdinalIgnoreCase)))
             && paths.Distinct(StringComparer.OrdinalIgnoreCase).Count() == paths.Length
             && !paths.Any(p => p.Split('/')[0] is "candidate.json" or "verify.cjs" or "factory-candidate")
-            && Commands.All(c => c is ["node", var script] && AdditionalReads.Contains(script)
+            && Commands.All(c => c is ["node", "verify.cjs"] || c is ["node", var script] && AdditionalReads.Contains(script)
                               || c is ["node", "--check", var checkedFile] && paths.Contains(checkedFile));
     }
 }
 
 public record CiRules(ProjectPolicy Policy, string Goal, JsonElement Settings, string Environment, string Script,
-    string ScriptHash, string[] RequiredRoles, string Publication, string Promotion, BlueprintPolicy? Blueprint = null, RepositoryLayout? RepositoryLayout = null);
+    string ScriptHash, string[] RequiredRoles, string Publication, string Promotion, BlueprintPolicy? Blueprint = null,
+    RepositoryLayout? RepositoryLayout = null,
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    HostedGitHubApproval? HostedGitHub = null);
 
 public record CiProfile(CiRules Rules, string Manifest, string Script)
 {

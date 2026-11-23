@@ -1,12 +1,31 @@
 namespace Factory;
 
+public record IssueStart(long RepositoryId, long IssueId, string ScopeHash);
+
 public sealed class GitHubSync(GitHubProject config, GitHubRepository repo, TaskStore store, IControlledProject project, CiProfile? ci = null)
 {
-    public async Task<GitHubStatus> Poll(int number, bool automatic = false)
+    private ApprovedIssue Approval(int number) => config.Issues.SingleOrDefault(i => i.Number == number)
+        ?? throw new CommandConflict("This issue is outside the configured admission list.");
+
+    public async Task<Guid> Start(int number, IssueStart request)
     {
-        var approval = config.Issues.SingleOrDefault(i => i.Number == number)
-            ?? throw new CommandConflict("This issue is outside the configured admission list.");
+        var approval = Approval(number);
+        if (!config.OperatorStart || request.RepositoryId != config.RepositoryId || request.IssueId != approval.Id ||
+            request.ScopeHash != approval.ScopeHash)
+            throw new CommandConflict("This issue selection differs from the installed approval. Reload the desk.");
         var status = store.GitHubStatusFor(config.RepositoryId, number);
+        if (status.TaskId is null) status = await Observe(approval, status, operatorStart: true);
+        if (status.TaskId is not { } id) throw new CommandConflict(status.Observation!.Reason);
+        if (status.Origin is not { } origin || origin.Repository != config.Repository || origin.ApiUrl != config.ApiUrl ||
+            origin.Base != config.BaseBranch || origin.IssueId != approval.Id || origin.ScopeHash != approval.ScopeHash ||
+            origin.Scenario != approval.Scenario || origin.PolicyHash != ci?.Hash)
+            throw new CommandConflict("The admitted task belongs to a different issue approval.");
+        return id;
+    }
+
+    private async Task<GitHubStatus> Observe(ApprovedIssue approval, GitHubStatus status, bool operatorStart = false)
+    {
+        var number = approval.Number;
         var origin = status.Origin;
         if (origin is not null && (origin.PolicyHash != ci?.Hash || origin.ApiUrl != config.ApiUrl || origin.Repository != config.Repository || origin.Base != config.BaseBranch))
             throw new CommandConflict("Project destination differs from the original admission.");
@@ -26,12 +45,21 @@ public sealed class GitHubSync(GitHubProject config, GitHubRepository repo, Task
             catch (CommandConflict ex) { reason = ex.Message; }
         }
         observation = observation with { Reason = reason };
-        status = store.ObserveIssue(config.RepositoryId, number, status.Version, observation, origin, source);
+        return store.ObserveIssue(config.RepositoryId, number, status.Version, observation, origin, source, operatorStart);
+    }
+
+    public async Task<GitHubStatus> Poll(int number, bool automatic = false)
+    {
+        var approval = Approval(number);
+        var status = store.GitHubStatusFor(config.RepositoryId, number);
+        if (config.OperatorStart && status.TaskId is null) return status;
+        status = await Observe(approval, status);
         if (status.TaskId is not { } taskId || status.Draft is not null) return status;
 
         if (automatic && store.PublicationHeld(taskId)) return status;
         try { return await Publish(status, approval, taskId); }
-        catch (UnknownPublication ex) when (status.Origin?.LocalJournal is null && new Uri(config.ApiUrl).IsLoopback)
+        catch (UnknownPublication ex) when (status.Origin is { LocalJournal: null } &&
+            (new Uri(config.ApiUrl).IsLoopback || config.HostedIssue is not null))
         {
             store.HoldPublication(taskId, ex.Message);
             store.PublicationProblem(taskId, ex.Message);

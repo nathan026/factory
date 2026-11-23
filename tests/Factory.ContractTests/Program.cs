@@ -54,6 +54,8 @@ for (int i = 0; i < 8; i++)
 Console.WriteLine("Passed: scoped checkout owner, pinned documents, command admission and required live writer");
 
 // Submit faulty worker outputs at the real controller boundary without exposing a test HTTP route.
+HostedGitHubChecks.Run();
+await GitHubAppChecks.Run();
 var fixture = new SampleRuntime();
 foreach (var fault in new[] { "foreign-run", "stale-policy", "wrong-input", "unknown-schema", "failed-status", "empty-plan", "missing-check" })
 {

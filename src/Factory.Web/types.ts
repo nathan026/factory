@@ -12,7 +12,12 @@ export type Task = {
   waitReason?: string;
 };
 export type QueueRow = { task: Task; revision: number; stateRevision: number };
-export type Catalog = { restorePaused: boolean; goal: string; scenarios: { id: string; label: string }[] };
+export type GitHubIntake = {
+  repository: string;
+  repositoryId: number;
+  issues: { number: number; id: number; scopeHash: string; scenario: string }[];
+};
+export type Catalog = { restorePaused: boolean; goal: string; scenarios: { id: string; label: string }[]; githubIntake?: GitHubIntake | null };
 export type Exchange = { id: string; afterEntry: number; text: string; reply: string; sentAt: string };
 export type Workspace = Task & {
   recovery: {
@@ -99,7 +104,7 @@ export type Evidence = {
 };
 export type Api = <T>(
   path: string,
-  options?: { body?: object; signal?: AbortSignal; minimal?: boolean; download?: boolean },
+  options?: { body?: object; signal?: AbortSignal; minimal?: boolean; download?: boolean; timeoutMs?: number },
 ) => Promise<T>;
 
 export function status(task: Task) {
