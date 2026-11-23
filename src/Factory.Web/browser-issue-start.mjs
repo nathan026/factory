@@ -11,7 +11,12 @@ try {
   const ids = [];
   for (let i = 0; i < 2; i++) {
     await page.getByRole("button", { name: "Start GitHub issue" }).click();
-    await page.getByLabel("Approved issue").selectOption({ label: repository + "#" + issue });
+    await page.getByLabel("Open issue").selectOption(issue);
+    if (i === 1) {
+      await page.getByRole("button", { name: "Open existing task" }).click();
+      await page.getByRole("region", { name: "Repository delivery" }).waitFor();
+      break;
+    }
     const result = page.waitForResponse(res => res.url().endsWith("/issues/" + issue + "/start") && res.request().method() === "POST");
     await page.getByRole("button", { name: "Begin", exact: true }).click();
     const response = await result;
@@ -21,7 +26,7 @@ try {
     await page.reload();
   }
   assert.ok(ids[0]);
-  assert.equal(ids[1], ids[0]);
+  assert.equal(ids.length, 1);
 } finally {
   await browser.close();
 }

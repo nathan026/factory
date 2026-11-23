@@ -211,6 +211,12 @@ if (github is not null)
         github.RunIssueAction(number,kind,command));
     app.MapPost("/api/github/issues/{number:int}/sync", (int number) => github.Poll(number));
     if (operatorIntake is not null)
+    {
+        app.MapGet("/api/github/issues", (int? page) => github.ListIssues(page ?? 1));
+        app.MapGet("/api/github/issues/{number:int}/scope", (int number) => github.ScopePreview(number));
+        app.MapPost("/api/github/issues/{number:int}/scope", (int number, ScopeRequest request) => github.ApproveScope(number,request));
+    }
+    if (operatorIntake is not null)
         app.MapPost("/api/github/issues/{number:int}/start", async (int number, IssueStart selection) =>
             new { taskId = await github.Start(number, selection) });
 }

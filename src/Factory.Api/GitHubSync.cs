@@ -1,14 +1,15 @@
 namespace Factory;
 
-public record IssueStart(long RepositoryId, long IssueId, string ScopeHash);
+public record IssueStart(long RepositoryId, long IssueId, string ScopeHash, Guid? ScopeApproval = null);
 
 public sealed partial class GitHubSync(GitHubProject config, GitHubRepository repo, TaskStore store, IControlledProject project, CiProfile? ci = null)
 {
     private ApprovedIssue Approval(int number) => config.Issues.SingleOrDefault(i => i.Number == number)
-        ?? throw new CommandConflict("This issue is outside the configured admission list.");
+        ?? AssignedApproval(number) ?? throw new CommandConflict("This issue is outside the configured admission list.");
 
     public async Task<Guid> Start(int number, IssueStart request)
     {
+        if (config.Issues.All(i => i.Number != number)) return await StartScopedIssue(number,request);
         var approval = Approval(number);
         if (!config.OperatorStart || request.RepositoryId != config.RepositoryId || request.IssueId != approval.Id ||
             request.ScopeHash != approval.ScopeHash)
@@ -126,21 +127,21 @@ public sealed partial class GitHubSync(GitHubProject config, GitHubRepository re
 }
 
 // Poll approved issues from canonical state. A notification can request the same poll without supplying issue data.
-public sealed class GitHubPoller(GitHubSync sync, GitHubProject config, ILogger<GitHubPoller> log) : BackgroundService
+public sealed class GitHubPoller(GitHubSync sync, ILogger<GitHubPoller> log) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stop)
     {
         using var timer = new PeriodicTimer(TimeSpan.FromSeconds(30));
         do
         {
-            foreach (var issue in config.Issues)
+            foreach (var number in sync.PollNumbers())
             {
                 if (stop.IsCancellationRequested) return;
-                try { await sync.Poll(issue.Number, automatic: true); }
+                try { await sync.Poll(number, automatic: true); }
                 catch (Exception e) when (e is HttpRequestException or TaskCanceledException or GitHubFailure or CommandConflict)
-                { log.LogWarning("GitHub poll for issue {Issue} deferred: {Reason}", issue.Number, e.Message); }
+                { log.LogWarning("GitHub poll for issue {Issue} deferred: {Reason}", number, e.Message); }
                 catch (Exception e)
-                { log.LogError(e, "GitHub poll for issue {Issue} failed. Continuing with the other approved issues.", issue.Number); }
+                { log.LogError(e, "GitHub poll for issue {Issue} failed. Continuing with the other approved issues.", number); }
             }
         } while (await timer.WaitForNextTickAsync(stop));
     }

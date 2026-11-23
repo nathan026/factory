@@ -4,7 +4,8 @@ namespace Factory;
 
 public record IssueObservation(long Id, string Title, string Body, string UpdatedAt, string Reason);
 public record IssueOrigin(string ApiUrl, long RepoId, string Repository, int Number, long IssueId, string Base, string BaseSha,
-    string BaseTree, string SourceHash, string Path, string Scenario, string ScopeHash, string? PolicyHash = null, Guid? LocalJournal = null);
+    string BaseTree, string SourceHash, string Path, string Scenario, string ScopeHash, string? PolicyHash = null, Guid? LocalJournal = null,
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)] Guid? DeskApproval = null);
 public record DraftIntent(Guid TaskId, string Branch, string Marker, string Candidate, string CandidateHash,
     Guid Verifier, Guid Reviewer, string GateHash, DateTimeOffset OpenedAt,
     [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
@@ -37,7 +38,7 @@ public sealed partial class TaskStore
     }
 
     public GitHubStatus ObserveIssue(long repo, int number, long version, IssueObservation observation,
-        IssueOrigin? origin, SourcePacket? source, bool operatorStart = false) => database.Write(s =>
+        IssueOrigin? origin, SourcePacket? source, bool operatorStart = false, SavedIssueScope? scope = null) => database.Write(s =>
     {
         var prior = IssueStatus(s, repo, number);
         if (operatorStart && prior.TaskId is not null) return prior;
@@ -48,7 +49,18 @@ public sealed partial class TaskStore
         var taskId = prior.TaskId;
         if (taskId is null && origin is not null && source is not null && observation.Reason == "Eligible")
         {
-            var task = lifecycle.Start(Guid.NewGuid(), origin.Scenario, observation.Title + "\n\n" + observation.Body, source);
+            var taskIdForRound = Guid.NewGuid();
+            RoundApproval? grant = null;
+            if (scope is not null)
+            {
+                if (GetScope(s,repo,number)?.Id != scope.Id || scope.Id != origin.DeskApproval ||
+                    scope.PolicyHash != ciProfile?.Hash || scope.BaseSha != origin.BaseSha ||
+                    s.Text("SELECT profile FROM controller_project WHERE id=1") != scope.PolicyHash)
+                    throw new CommandConflict("The approved scope or active project changed. Review it again.");
+                grant = new RoundApproval(scope.Id,taskIdForRound,scope.Goal,origin.BaseSha,source.Fingerprint(),scope.PolicyHash);
+                grant.Persist();
+            }
+            var task = lifecycle.Start(taskIdForRound, origin.Scenario, observation.Title + "\n\n" + observation.Body, source, followUp: grant);
             if (operatorStart) task.Record("Operator", $"Requested start of {origin.Repository}#{number}.");
             task.Record("Controller", $"Admitted {origin.Repository}#{number} at {origin.BaseSha}.");
             Save(s, task);

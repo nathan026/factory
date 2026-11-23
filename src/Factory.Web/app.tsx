@@ -1,8 +1,9 @@
+import { GitHubIssueForm } from "./issue-picker";
 import { ReviseRound } from "./revise-round";
 import React, { useCallback, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { IssueActions } from "./issue-actions";
-import { age, Api, Catalog, GitHubIntake, QueueRow, status, Task, Workspace } from "./types";
+import { age, Api, Catalog, QueueRow, status, Task, Workspace } from "./types";
 import { Brief, Conversation, EvidencePanel, ExpertAdvice, RecoverOperation } from "./panels";
 
 import { RestorePanel } from "./restore";
@@ -475,46 +476,6 @@ type StartFormProps = {
   created: (id: string) => void;
   cancel?: () => void;
 };
-
-function GitHubIssueForm({ intake, goal, api, ready, created, cancel }: StartFormProps & { intake: GitHubIntake; goal: string }) {
-  const [number, select] = useState(intake.issues[0].number);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
-  const issue = intake.issues.find(item => item.number === number)!;
-  async function begin(event: React.FormEvent) {
-    event.preventDefault();
-    if (!ready || busy) return;
-    setBusy(true);
-    setError("");
-    try {
-      const result = await api<{ taskId: string }>(`github/issues/${number}/start`, {
-        body: { repositoryId: intake.repositoryId, issueId: issue.id, scopeHash: issue.scopeHash },
-        timeoutMs: 90000,
-      });
-      created(result.taskId);
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  }
-  return (
-    <form className="card start" onSubmit={begin}>
-      <h1>Start GitHub issue</h1>
-      <label>Approved issue
-        <select value={number} disabled={busy} onChange={e => select(Number(e.target.value))}>
-          {intake.issues.map(item => <option key={item.id} value={item.number}>{intake.repository}#{item.number}</option>)}
-        </select>
-      </label>
-      <p>{goal}</p>
-      {error && <p role="alert">{error}</p>}
-      <div className="actions">
-        <button disabled={!ready || busy}>{busy ? "Starting…" : "Begin"}</button>
-        {cancel && <button type="button" className="secondary" disabled={busy} onClick={cancel}>Cancel</button>}
-      </div>
-    </form>
-  );
-}
 
 function NewTask(props: StartFormProps & { catalog: Catalog }) {
   const { catalog } = props;

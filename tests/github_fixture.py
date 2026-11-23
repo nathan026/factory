@@ -220,6 +220,10 @@ class GitHubFixture:
         if method == "GET":
             if not path:
                 return 200, {"id":self.repo_id, "full_name":self.repo, "node_id":"fixture-node", "default_branch":"main"}
+            if path == "issues":
+                issues = sorted((i for i in self.issues.values() if i["state"]=="open"), key=lambda i:-i["number"])
+                page = int(query.get("page",["1"])[0])
+                return 200, issues[(page-1)*50:page*50]
             if path.startswith("issues/"):
                 issue = self.issues.get(int(path.split("/")[1]))
                 return (200, issue) if issue else (404, {})

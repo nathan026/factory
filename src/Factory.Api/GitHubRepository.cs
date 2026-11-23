@@ -11,7 +11,7 @@ namespace Factory;
 public record ApprovedIssue(int Number, long Id, string ScopeHash, string Scenario);
 public record HostedGitHubApproval(string BaseBranch, ApprovedIssue Issue);
 public record GitHubProject(string Repository, long RepositoryId, string BaseBranch, ApprovedIssue[] Issues,
-    string ApiUrl = "https://api.github.com", bool LocalAtomicDraft = false, bool OperatorStart = false, string? IssueActionBot = null)
+    string ApiUrl = "https://api.github.com", bool LocalAtomicDraft = false, bool OperatorStart = false, string? IssueActionBot = null, bool DeskScopeApprovals = false)
 {
     // Set only after the controller verifies the installed policy against its intake file.
     internal ApprovedIssue? HostedIssue { get; private init; }
@@ -122,16 +122,20 @@ public sealed partial class GitHubRepository : IDisposable
         catch (JsonException) { throw new GitHubFailure("Invalid JSON in the GitHub response."); }
     }
 
-    public async Task<JsonNode> Issue(int number)
+    private async Task VerifyRepository()
     {
         var repo = (await Call(""))!;
         if ((long?)repo["id"] != config.RepositoryId || !string.Equals((string?)repo["full_name"], config.Repository, StringComparison.OrdinalIgnoreCase))
             throw new CommandConflict("Configured repository identity changed.");
+    }
+    public async Task<JsonNode> Issue(int number)
+    {
+        await VerifyRepository();
         return (await Call($"issues/{number}"))!;
     }
     public async Task<IssueObservation> ObserveIssue(int number, ApprovedIssue approval, IssueOrigin? origin)
     {
-        if (number != approval.Number || !config.Issues.Contains(approval))
+        if (number != approval.Number || !config.Issues.Contains(approval) && !(config.DeskScopeApprovals && origin?.DeskApproval is not null && origin.Number == number && origin.RepoId == config.RepositoryId && approval.Id == origin.IssueId && approval.ScopeHash == origin.ScopeHash))
             throw new CommandConflict("Issue is outside the configured approval.");
         return Observe(await Issue(number), approval, origin);
     }
@@ -149,8 +153,8 @@ public sealed partial class GitHubRepository : IDisposable
             : (string?)issue["state"] != "open" ? "Issue is closed"
             : labels.Overlaps(["hold", "factory:hold"]) ? "Issue is held"
             : labels.Overlaps(["duplicate", "superseded", "factory:covered"]) ? "Issue is already covered or superseded"
-            : !labels.Contains("bug") && config.HostedIssue != approval ? "Issue is not an eligible bug"
-            : string.IsNullOrWhiteSpace(title) || string.IsNullOrWhiteSpace(body) || scope != approval.ScopeHash ? "Issue scope needs approval"
+            : !labels.Contains("bug") && config.HostedIssue != approval && !(config.DeskScopeApprovals && origin?.DeskApproval is not null) ? "Issue is not an eligible bug"
+            : string.IsNullOrWhiteSpace(title) || (string.IsNullOrWhiteSpace(body) && origin?.DeskApproval is null) || scope != approval.ScopeHash ? "Issue scope needs approval"
             : "Eligible";
 
         if (origin is not null && (origin.IssueId != approval.Id || origin.ScopeHash != scope || origin.Scenario != approval.Scenario))
