@@ -74,8 +74,42 @@ static class HostedGitHubChecks
             }
             settings["base"] = "HEAD";
             Refuse(config, Install());
+            CheckSingleFileRuntime(directory.FullName, manifest, manifestPath, name + "/v1");
             Console.WriteLine("Passed: single hosted issue approval, repository, revision, scope and holds");
         }
         finally { directory.Delete(recursive: true); }
+    }
+
+    private static void CheckSingleFileRuntime(string directory, JsonNode manifest, string manifestPath, string version)
+    {
+        File.WriteAllText(Path.Combine(directory, "verify.cjs"), "console.log('test');");
+        manifest["script"] = "verify.cjs";
+        manifest["scriptHash"] = Wire.Digest("console.log('test');");
+        manifest["settings"]!["base"] = new string('a', 40);
+        manifest["policy"]!["requiredChecks"] = JsonNode.Parse("""["bounded-source","accent"]""");
+        manifest["blueprint"]!["earlyChecks"] = JsonNode.Parse("""["bounded-source"]""");
+        var layout = new RepositoryLayout("test.css", "scope.md", "cases.md", [], [["node", "verify.cjs"]]);
+        manifest["repositoryLayout"] = JsonSerializer.SerializeToNode(layout, Wire.Json);
+        File.WriteAllText(manifestPath, manifest.ToJsonString());
+        foreach (var path in layout.Paths) File.WriteAllText(Path.Combine(directory, path), path);
+        var ci = CiProfile.Load(directory, version);
+        var project = new HostedRepositoryProject(directory, ci);
+        var owner = new Lifecycle(project, ci);
+        var task = owner.Start(Guid.NewGuid(), project.Scenarios.Single().Id);
+        WorkOrder? order = null;
+        for (var i = 0; i < 8; i++)
+        {
+            order = owner.Prepare(task);
+            if (order is null) continue;
+            if (order.Action == WorkAction.Implement) break;
+            owner.Apply(task, order, order.Execute(project), Guid.NewGuid());
+        }
+        if (order?.Action != WorkAction.Implement || order.Answer?.Value != layout.Source)
+            throw new Exception("Owner failed to retain the approved single-file scope through planning.");
+        if (project.CandidateError(new string('x', 16385)) is null || project.CandidateError("body {}") is not null)
+            throw new Exception("Unexpected hosted candidate size bound.");
+        try { project.Implement(order.Assignment, task.Source, order.Answer, null, order.Context); }
+        catch (CommandConflict) { return; }
+        throw new Exception("Controlled worker implemented a hosted change");
     }
 }

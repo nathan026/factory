@@ -36,7 +36,7 @@ public record RepositoryLayout(string Source, string Decisions, string Cases, st
                    && !paths.Any(other => other.StartsWith(p + "/", StringComparison.OrdinalIgnoreCase)))
             && paths.Distinct(StringComparer.OrdinalIgnoreCase).Count() == paths.Length
             && !paths.Any(p => p.Split('/')[0] is "candidate.json" or "verify.cjs" or "factory-candidate")
-            && Commands.All(c => c is ["node", var script] && AdditionalReads.Contains(script)
+            && Commands.All(c => c is ["node", "verify.cjs"] || c is ["node", var script] && AdditionalReads.Contains(script)
                               || c is ["node", "--check", var checkedFile] && paths.Contains(checkedFile));
     }
 }

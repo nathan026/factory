@@ -35,7 +35,8 @@ const source = Object.fromEntries(Object.entries(request.paths).map(([key,path])
 const deadline = Date.now()+15000;
 let last;
 for (const path of request.targets) {
-    const input = JSON.stringify({selector:request.selector,decision:request.decision,candidate:read(path),cases:source.cases,source});
+    const input = JSON.stringify({selector:request.selector,decision:request.decision,candidate:read(path),cases:source.cases,source,
+        baseSource:request.baseSource});
     for (const command of request.commands) {
         const ms = deadline-Date.now();
         if (ms<=0 || command[0]!=='node') process.exit(2);
@@ -99,6 +100,9 @@ def execute(job, leases=None):
                 or order["assignment"]["requiredChecks"] != rules["policy"]["requiredChecks"]):
             raise ValueError("Repository commands require an admitted Git revision")
         files.update(candidate_files(layout, order["candidate"]))
+        if ["node", "verify.cjs"] in layout["commands"]:
+            # verify.cjs is reserved by RepositoryLayout. Only the digest-bound controller script may occupy it.
+            files["verify.cjs"] = script
     else:
         files.update({"candidate.json": order["candidate"], "verify.cjs": script})
     for selector in order["assignment"]["requiredChecks"]:
@@ -115,6 +119,8 @@ def execute(job, leases=None):
                 program = RUN_SUITE
                 packet["commands"] = layout["commands"]
                 packet["targets"] = [layout["source"], *layout.get("additionalWrites", [])]
+                if ["node", "verify.cjs"] in layout["commands"]:
+                    packet["baseSource"] = order["source"]["source"]
             run = (leases.execute(generation, program, packet, timeout=remaining()) if deadline is not None
                    else leases.execute(generation, program, packet))
             code = run.returncode

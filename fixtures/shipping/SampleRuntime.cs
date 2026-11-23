@@ -19,7 +19,7 @@ public sealed class SampleRuntime : IControlledProject
 
     private readonly bool ownerDiscussion;
 
-    public SampleRuntime(string version = "shipping/v1", bool ownerDiscussion = false)
+    public SampleRuntime(string version = "shipping/v1", bool ownerDiscussion = false, CiProfile? installed = null)
     {
         this.ownerDiscussion = ownerDiscussion && version == "shipping/v1";
         sampleDirectory = Path.Combine(AppContext.BaseDirectory, "sample");
@@ -28,7 +28,7 @@ public sealed class SampleRuntime : IControlledProject
             if (!System.Text.RegularExpressions.Regex.IsMatch(version, @"^[a-z][a-z0-9-]*/v[1-9][0-9]*$"))
                 throw new InvalidDataException("Invalid project profile name.");
             sampleDirectory = Path.Combine(AppContext.BaseDirectory, "projects", version.Split('/')[0]);
-            Ci = CiProfile.Load(sampleDirectory, version);
+            Ci = installed ?? CiProfile.Load(sampleDirectory, version);
             if (!Ci.Rules.Settings.TryGetProperty("proposedThreshold", out var value) ||
                 !value.TryGetInt32(out var amount) || amount < 0)
                 throw new InvalidDataException("The checkout profile requires a nonnegative proposed threshold.");

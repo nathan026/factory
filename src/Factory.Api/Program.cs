@@ -6,8 +6,14 @@ using System.Text.Json.Serialization;
 using Factory;
 using Factory.Fixtures;
 
-static IControlledProject LoadProject(string version) => version is FactorySummaryProject.Version or FactorySummaryProject.LiveVersion
-    ? new FactorySummaryProject(version) : new SampleRuntime(version, Environment.GetEnvironmentVariable("FACTORY_OWNER_RUNTIME") == "codex-subscription");
+static IControlledProject LoadProject(string version)
+{
+    if (version is FactorySummaryProject.Version or FactorySummaryProject.LiveVersion) return new FactorySummaryProject(version);
+    if (version == "shipping/v1") return new SampleRuntime(version, Environment.GetEnvironmentVariable("FACTORY_OWNER_RUNTIME") == "codex-subscription");
+    var directory = Path.Combine(AppContext.BaseDirectory, "projects", version.Split('/')[0]);
+    var ci = CiProfile.Load(directory, version);
+    return ci.Rules.HostedGitHub is null ? new SampleRuntime(version, installed: ci) : new HostedRepositoryProject(directory, ci);
+}
 
 static string ControllerDigest()
 {
