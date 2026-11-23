@@ -134,8 +134,10 @@ class IssuePickerTest(unittest.TestCase):
         proposal = dict(goal="Test the shipping threshold.",paths=view["paths"],checks=view["checks"])
         open_items = dict(investigations=["Check how shipping handles the exact threshold."],
                           decisions=["Should the shipping threshold be inclusive?"])
+        ambiguous = {"investigations":open_items["investigations"], "Investigations":[], "decisions":[]}
         previous = None
         for assessment, status in [(None,"NeedsAssessment"), ({"investigations":[]}, "NeedsAssessment"),
+                                   (ambiguous,"NeedsAssessment"),
                                    (open_items,"Answered"), (CLEAR_ASSESSMENT,"Answered")]:
             message = dict(**pins,id=str(uuid.uuid4()),previous=previous,text="Assess the shipping scope.")
             self.invoke("message",body=message)

@@ -1,7 +1,7 @@
 using System.Text;
-using System.Text.RegularExpressions;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.RegularExpressions;
 
 namespace Factory;
 
@@ -42,6 +42,12 @@ public record ScopeAssessment(string[] Investigations, string[] Decisions)
 public record ScopeReply(string RequestHash, string Reply, ScopeProposal? Proposal,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] JsonElement Assessment = default)
 {
+    private static readonly JsonSerializerOptions AssessmentJson = new(Wire.ResultJson)
+    {
+        PropertyNameCaseInsensitive = false,
+        AllowDuplicateProperties = false
+    };
+
     internal bool Valid(OwnerQuestion question) => RequestHash == GateInput.Hash(question) &&
         !string.IsNullOrWhiteSpace(Reply) && Reply.Length <= 4000;
 
@@ -50,7 +56,7 @@ public record ScopeReply(string RequestHash, string Reply, ScopeProposal? Propos
         if (Assessment.ValueKind != JsonValueKind.Object) return null;
         try
         {
-            var items = Assessment.Deserialize<ScopeAssessment>(Wire.ResultJson);
+            var items = Assessment.Deserialize<ScopeAssessment>(AssessmentJson);
             return items is not null && items.Valid() ? items : null;
         }
         catch (JsonException) { return null; }
@@ -62,7 +68,7 @@ public record ScopeReply(string RequestHash, string Reply, ScopeProposal? Propos
         if (Proposal is null) return Reply;
         var checks = Proposal.Checks is { Length: > 0 and <= 16 } items &&
             items.All(c => !string.IsNullOrWhiteSpace(c) && c.Length <= 2000)
-            ? "\n\nSuggested checks\n" + string.Join("\n", items.Select(c => "• " + c)) : "";
+            ? "\n\nSuggested checks\n" + string.Join("\n", items.Select(c => "â€¢ " + c)) : "";
         return Reply + checks;
     }
 }
