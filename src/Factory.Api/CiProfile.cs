@@ -42,7 +42,10 @@ public record RepositoryLayout(string Source, string Decisions, string Cases, st
 }
 
 public record CiRules(ProjectPolicy Policy, string Goal, JsonElement Settings, string Environment, string Script,
-    string ScriptHash, string[] RequiredRoles, string Publication, string Promotion, BlueprintPolicy? Blueprint = null, RepositoryLayout? RepositoryLayout = null);
+    string ScriptHash, string[] RequiredRoles, string Publication, string Promotion, BlueprintPolicy? Blueprint = null,
+    RepositoryLayout? RepositoryLayout = null,
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    HostedGitHubApproval? HostedGitHub = null);
 
 public record CiProfile(CiRules Rules, string Manifest, string Script)
 {

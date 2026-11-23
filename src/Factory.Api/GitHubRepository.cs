@@ -9,9 +9,13 @@ using System.Text.RegularExpressions;
 namespace Factory;
 
 public record ApprovedIssue(int Number, long Id, string ScopeHash, string Scenario);
+public record HostedGitHubApproval(string BaseBranch, ApprovedIssue Issue);
 public record GitHubProject(string Repository, long RepositoryId, string BaseBranch, ApprovedIssue[] Issues,
     string ApiUrl = "https://api.github.com", bool LocalAtomicDraft = false)
 {
+    // Set only after the controller verifies the installed policy against its intake file.
+    internal ApprovedIssue? HostedIssue { get; private init; }
+
     public static GitHubProject Load(string path, IControlledProject project)
     {
         var config = JsonSerializer.Deserialize<GitHubProject>(File.ReadAllText(path), Wire.ResultJson)!;
@@ -26,11 +30,24 @@ public record GitHubProject(string Repository, long RepositoryId, string BaseBra
             && IPAddress.IsLoopback(ip) && url.AbsolutePath == "/" && url.Query == "" && url.Fragment == "" && url.UserInfo == ""))
             throw new InvalidDataException("Use the GitHub API or a loopback qualification endpoint.");
         if (config.LocalAtomicDraft && !url.IsLoopback) throw new InvalidDataException("Atomic Drafts require the local Git provider.");
-        if (project is Factory.Fixtures.FactorySummaryProject || project.Ci?.Rules.RepositoryLayout is not null)
+        var ci = project.Ci;
+        if (ci?.Rules.HostedGitHub is not null && !ci.RequiresCodex)
+            throw new InvalidDataException("Hosted factory admission requires live Codex workers.");
+        if (project is Factory.Fixtures.FactorySummaryProject || ci?.Rules.RepositoryLayout is not null)
         {
-            var rules = project.Ci!.Rules.Settings;
-            if (!url.IsLoopback || config.Repository != rules.GetProperty("repository").GetString() ||
-                config.RepositoryId != rules.GetProperty("repositoryId").GetInt64() || config.BaseBranch != "main")
+            var rules = ci!.Rules.Settings;
+            if (config.Repository != rules.GetProperty("repository").GetString() ||
+                config.RepositoryId != rules.GetProperty("repositoryId").GetInt64())
+                throw new InvalidDataException("Factory source differs from the installed repository identity.");
+            if (ci.Rules.HostedGitHub is { } hosted)
+            {
+                if (config.ApiUrl != "https://api.github.com" || config.BaseBranch != hosted.BaseBranch ||
+                    config.Issues is not [var issue] || issue != hosted.Issue ||
+                    !Regex.IsMatch(rules.GetProperty("base").GetString() ?? "", @"\A[0-9a-f]{40}\z"))
+                    throw new InvalidDataException("Hosted factory destination or issue differs from the installed approval.");
+                return config with { HostedIssue = issue };
+            }
+            if (!url.IsLoopback || config.BaseBranch != "main")
                 throw new InvalidDataException("Factory-source qualification requires its approved loopback repository.");
         }
         return config;
@@ -86,7 +103,13 @@ public sealed class GitHubRepository : IDisposable
     }
     public async Task<IssueObservation> ObserveIssue(int number, ApprovedIssue approval, IssueOrigin? origin)
     {
-        var issue = await Issue(number);
+        if (number != approval.Number || !config.Issues.Contains(approval))
+            throw new CommandConflict("Issue is outside the configured approval.");
+        return Observe(await Issue(number), approval, origin);
+    }
+
+    public IssueObservation Observe(JsonNode issue, ApprovedIssue approval, IssueOrigin? origin)
+    {
         var title = (string?)issue["title"] ?? "";
         var body = (string?)issue["body"] ?? "";
         var scope = Wire.Digest(title + "\n" + body);
@@ -94,11 +117,11 @@ public sealed class GitHubRepository : IDisposable
             issue["labels"] is not JsonArray labelList || (string?)issue["updated_at"] is not { } updatedAt)
             throw new GitHubFailure("Incomplete issue response.");
         var labels = labelList.Select(l => (string?)l?["name"]).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var reason = id != approval.Id || (int?)issue["number"] != number || issue["pull_request"] is not null ? "Issue identity is not authorized"
+        var reason = id != approval.Id || (int?)issue["number"] != approval.Number || issue["pull_request"] is not null ? "Issue identity is not authorized"
             : (string?)issue["state"] != "open" ? "Issue is closed"
             : labels.Overlaps(["hold", "factory:hold"]) ? "Issue is held"
             : labels.Overlaps(["duplicate", "superseded", "factory:covered"]) ? "Issue is already covered or superseded"
-            : !labels.Contains("bug") ? "Issue is not an eligible bug"
+            : !labels.Contains("bug") && config.HostedIssue != approval ? "Issue is not an eligible bug"
             : string.IsNullOrWhiteSpace(title) || string.IsNullOrWhiteSpace(body) || scope != approval.ScopeHash ? "Issue scope needs approval"
             : "Eligible";
 
