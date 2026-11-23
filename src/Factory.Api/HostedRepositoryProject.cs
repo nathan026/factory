@@ -39,7 +39,7 @@ public sealed class HostedRepositoryProject : IControlledProject
         if (Ci.Rules.Revision is not null) return original with { Requirements = original.Requirements with { Constraints = [objective] } };
         var checks = original.Requirements.Criteria.Select(c => c.Id == "bounded-source" ? c :
             c with { Text = $"Pass the installed {c.Id} check." }).ToArray();
-        return original with { Requirements = new(checks, ["Use the installed verifier."], original.Requirements.Exclusions) };
+        return original with { Requirements = new(checks, [objective, "Use the installed verifier."], original.Requirements.Exclusions) };
     }
 
     public WorkerResult<string> Plan(Assignment a, PhaseContext? context) => new(a.Reference(), ResultStatus.Completed, context?.Brief.Goal ?? Goal,
