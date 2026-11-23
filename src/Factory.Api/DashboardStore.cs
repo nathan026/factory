@@ -8,7 +8,9 @@ public record DecisionOption(string Value, string Label);
 public record Discussion(Guid Id, int AfterEntry, string Text, string Reply, DateTimeOffset SentAt,
     string? Status = null, string? Operation = null, string? EvidenceHash = null,
     [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
-    ScopeProposal? Proposal = null);
+    ScopeProposal? Proposal = null,
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    ScopeAssessment? Assessment = null);
 public record TaskSummary(Guid Id, string Scenario, string Goal, Phase Phase, Activity Activity,
     DateTimeOffset? OpenedAt, string? WaitReason, string? LastActivity, int? DraftNumber = null, bool IssueFinished = false);
 public record QueueRow(TaskSummary Task, long Revision, long StateRevision);

@@ -1,9 +1,12 @@
 using System.Text;
 using System.Text.RegularExpressions;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace Factory;
 
-public record ScopePlanning(string BaseSha, ExpertSource[] Files)
+public record ScopePlanning(string BaseSha, ExpertSource[] Files,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool RequireAssessment = false)
 {
     internal static bool FilePath(string? path) =>
         path is { Length: > 0 and <= 240 } && path.Split('/').All(p => Regex.IsMatch(p, @"\A[a-zA-Z0-9][a-zA-Z0-9_.-]{0,79}\z"));
@@ -26,10 +29,32 @@ public record ScopeProposal(string Goal, string[] Paths, string[] Checks)
         Checks.Distinct(StringComparer.Ordinal).Count() == Checks.Length;
 }
 
-public record ScopeReply(string RequestHash, string Reply, ScopeProposal? Proposal)
+public record ScopeAssessment(string[] Investigations, string[] Decisions)
+{
+    private static bool ValidItems(string[]? items) => items is { Length: <= 8 } &&
+        items.All(item => !string.IsNullOrWhiteSpace(item) && item.Length <= 400) &&
+        items.Distinct(StringComparer.Ordinal).Count() == items.Length;
+
+    internal bool Valid() => ValidItems(Investigations) && ValidItems(Decisions);
+    internal bool HasOpenItems() => Investigations.Length > 0 || Decisions.Length > 0;
+}
+
+public record ScopeReply(string RequestHash, string Reply, ScopeProposal? Proposal,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] JsonElement Assessment = default)
 {
     internal bool Valid(OwnerQuestion question) => RequestHash == GateInput.Hash(question) &&
         !string.IsNullOrWhiteSpace(Reply) && Reply.Length <= 4000;
+
+    internal ScopeAssessment? ReadAssessment()
+    {
+        if (Assessment.ValueKind != JsonValueKind.Object) return null;
+        try
+        {
+            var items = Assessment.Deserialize<ScopeAssessment>(Wire.ResultJson);
+            return items is not null && items.Valid() ? items : null;
+        }
+        catch (JsonException) { return null; }
+    }
 
     // Keep useful discussion text when a suggested scope cannot be admitted.
     public string DiscussionText()

@@ -16,7 +16,7 @@ const browser=await chromium.launch();
 try {
   const page=await browser.newPage();
   let view={repositoryId:44,issueId:77,issueHash:"issue",baseSha:"revision",policyHash:"policy",
-    ownerAvailable:true,messages:[],canBegin:false,stale:false,proposal:null};
+    assigned:true,ownerAvailable:true,messages:[],canBegin:false,stale:false,proposal:null};
   let starts=0, sends=0, saves=0;
   await page.exposeFunction("started",id=>{assert.equal(id,"same-task"); starts++;});
   await page.exposeFunction("fixtureApi",(path,body)=>{
@@ -30,6 +30,11 @@ try {
     assert.ok(path.startsWith("github/issues/7/discussion"));
     if(body) {
       assert.equal(body.previous,view.messages.at(-1)?.id ?? null);
+      if (sends === 0) {
+        assert.match(body.text,/Prepare this issue for coding/);
+        assert.match(body.text,/investigations/);
+        assert.match(body.text,/decisions/);
+      }
       sends++;
       view.messages.push({id:body.id,text:body.text,status:"Pending",reply:"Reading the issue."});
     } else if(path.includes("?poll") && view.messages.at(-1)?.status==="Pending") {
@@ -47,6 +52,8 @@ try {
   await page.getByRole("button",{name:"Discuss issue #7"}).click();
   await page.getByRole("button",{name:"Record scope request"}).click();
   assert.equal(saves,1);
+  const readiness = page.getByRole("region",{name:"Coding readiness"});
+  assert.equal(await readiness.getByText("Not ready to begin",{exact:true}).count(),1);
   assert.equal(await page.getByRole("button",{name:"Begin coding"}).count(),0);
   await page.reload();
   await page.addScriptTag({content:bundle.outputFiles[0].text});
@@ -59,6 +66,33 @@ try {
   await page.getByRole("button",{name:"Begin coding"}).click();
   assert.equal(sends,2);
   assert.equal(starts,1);
+  assert.equal(await readiness.getByText("Ready to begin",{exact:true}).count(),1);
+
+  async function reopen() {
+    await page.reload();
+    await page.addScriptTag({content:bundle.outputFiles[0].text});
+    await page.getByRole("button",{name:"Discuss issue #7"}).click();
+    await readiness.waitFor();
+  }
+  view={...view,assigned:false,stale:true,canBegin:false,proposal:null,scopeApproval:null,
+    messages:[{id:"historical",text:"Discuss the desk",reply:"Inspect the frontend before choosing files.\n\nSuggested checks\nKeep the composer visible.",status:"RecoveredReply"}]};
+  await reopen();
+  assert.equal(sends,2);
+  await readiness.getByText("Previous owner finding").waitFor();
+  await readiness.getByText("Inspect the frontend before choosing files.").waitFor();
+  await readiness.getByText("Project setup needed.").waitFor();
+  assert.equal(await readiness.getByRole("button",{name:"Begin coding"}).count(),0);
+  await readiness.getByRole("button",{name:"Reassess readiness"}).click();
+  assert.equal(sends,3);
+  view={...view,stale:false,canBegin:false,proposal:null,scopeApproval:null,
+    messages:[{id:"clarify",text:"Review again",reply:"Which screen size should we target?",status:"Answered",
+      assessment:{investigations:["Locate the layout component."],decisions:["Which screen size should we target?"]}}]};
+  await reopen();
+  await readiness.getByRole("listitem").filter({hasText:"Locate the layout component."}).waitFor();
+  await readiness.getByRole("listitem").filter({hasText:"Which screen size should we target?"}).waitFor();
+  await readiness.getByRole("button",{name:"Answer the owner"}).click();
+  assert.equal(await page.getByLabel("Message the lifecycle owner").evaluate(el=>document.activeElement===el),true);
+  assert.equal(sends,3);
 } finally {
   await browser.close();
 }

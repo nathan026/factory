@@ -17,6 +17,7 @@ from github_fixture import GitHubFixture
 
 ROOT = Path(__file__).resolve().parents[1]
 CONTRACT = ROOT / "tests" / "Factory.ContractTests"
+CLEAR_ASSESSMENT = {"investigations":[],"decisions":[]}
 
 
 class IssuePickerTest(unittest.TestCase):
@@ -101,7 +102,7 @@ class IssuePickerTest(unittest.TestCase):
         self.assertEqual(claim["workerMode"],"codex-subscription")
         selected = self.invoke("preview")
         proposal = dict(goal="Respect the approved shipping boundary.",paths=selected["paths"],checks=selected["checks"])
-        result = dict(requestHash=claim["requestHash"],reply="I will test the exact threshold.",proposal=proposal)
+        result = dict(requestHash=claim["requestHash"],assessment=CLEAR_ASSESSMENT,reply="I will test the exact threshold.",proposal=proposal)
         send = dict(id=claim["id"],token=claim["token"],result=result)
         self.conflict("receive",body=send)
         self.seal_owner(claim,result)
@@ -109,6 +110,7 @@ class IssuePickerTest(unittest.TestCase):
         approved = self.invoke("discussion")
         self.assertTrue(approved["canBegin"])
         self.assertEqual(approved["proposal"],proposal)
+        self.assertEqual(approved["messages"][-1]["assessment"],CLEAR_ASSESSMENT)
         start = dict(repositoryId=view["repositoryId"],issueId=view["issueId"],scopeHash=view["issueHash"],scopeApproval=approved["scopeApproval"])
         self.git.issues[5]["title"] += " changed"
         self.assertTrue(self.invoke("discussion")["stale"])
@@ -126,6 +128,59 @@ class IssuePickerTest(unittest.TestCase):
         self.assertIn(message["text"],str(plan["context"]["brief"]["requirements"]["constraints"]))
         self.assertEqual(self.git.writes,[])
 
+    def test_new_turn_requires_current_complete_assessment_before_scope_approval(self):
+        view = self.invoke("preview")
+        pins = {k:view[k] for k in ("repositoryId","issueId","issueHash","baseSha","policyHash")}
+        proposal = dict(goal="Test the shipping threshold.",paths=view["paths"],checks=view["checks"])
+        open_items = dict(investigations=["Check how shipping handles the exact threshold."],
+                          decisions=["Should the shipping threshold be inclusive?"])
+        previous = None
+        for assessment, status in [(None,"NeedsAssessment"), ({"investigations":[]}, "NeedsAssessment"),
+                                   (open_items,"Answered"), (CLEAR_ASSESSMENT,"Answered")]:
+            message = dict(**pins,id=str(uuid.uuid4()),previous=previous,text="Assess the shipping scope.")
+            self.invoke("message",body=message)
+            previous = message["id"]
+            claim = self.invoke("ownerClaim")
+            self.assertTrue(claim["question"]["scopePlanning"]["requireAssessment"])
+            if assessment == CLEAR_ASSESSMENT:
+                context = json.loads(claim["question"]["evidence"]["content"])
+                self.assertEqual(context["transcript"][-1]["assessment"],open_items)
+            result = dict(requestHash=claim["requestHash"],reply="I checked the issue.",proposal=proposal)
+            if assessment is not None:
+                result["assessment"] = assessment
+            self.seal_owner(claim,result)
+            self.assertTrue(self.invoke("receive",body=dict(id=claim["id"],token=claim["token"],result=result)))
+            saved = self.invoke("discussion")
+            last = saved["messages"][-1]
+            self.assertEqual(last["status"],status)
+            self.assertEqual(last.get("assessment"),assessment if status == "Answered" else None)
+            self.assertEqual(saved["canBegin"],assessment == CLEAR_ASSESSMENT)
+            if not saved["canBegin"]:
+                self.assertIsNone(saved["proposal"])
+                self.assertIsNone(saved["scopeApproval"])
+                self.assertIsNone(self.invoke("preview")["saved"])
+
+    def test_legacy_order_and_reply_preserve_original_approval(self):
+        view = self.invoke("preview")
+        pins = {k:view[k] for k in ("repositoryId","issueId","issueHash","baseSha","policyHash")}
+        self.invoke("message",body=dict(**pins,id=str(uuid.uuid4()),previous=None,text="Confirm the shipping scope."))
+        # Represent an outbox entry admitted before assessments were introduced.
+        with closing(sqlite3.connect(self.directory/"slice.db")) as db, db:
+            operation, raw = db.execute("select id, request from dispatch_outbox").fetchone()
+            order = json.loads(raw)
+            del order["discussion"]["scopePlanning"]["requireAssessment"]
+            db.execute("update dispatch_outbox set request=? where id=?",(json.dumps(order),operation))
+        claim = self.invoke("ownerClaim")
+        self.assertNotIn("requireAssessment",claim["question"]["scopePlanning"])
+        self.assertEqual(claim["question"],order["discussion"])
+        result = dict(requestHash=claim["requestHash"],reply="The approved tests cover the threshold.",
+                      proposal=dict(goal="Test the inclusive boundary.",paths=view["paths"],checks=view["checks"]))
+        self.seal_owner(claim,result)
+        self.assertTrue(self.invoke("receive",body=dict(id=claim["id"],token=claim["token"],result=result)))
+        saved = self.invoke("discussion")
+        self.assertTrue(saved["canBegin"])
+        self.assertNotIn("assessment",saved["messages"][-1])
+
     def test_narrative_in_path_preserves_verified_reply_only(self):
         view = self.invoke("discussion")
         pins = {k:view[k] for k in ("repositoryId","issueId","issueHash","baseSha","policyHash")}
@@ -134,7 +189,7 @@ class IssuePickerTest(unittest.TestCase):
         claim = self.invoke("ownerClaim")
         invalid = dict(goal="Improve layout",paths=["Inspect the frontend to identify its files."],
                        checks=["Keep the composer visible."])
-        result = dict(requestHash=claim["requestHash"],reply="I need read access to identify the file.",proposal=invalid)
+        result = dict(requestHash=claim["requestHash"],assessment=CLEAR_ASSESSMENT,reply="I need read access to identify the file.",proposal=invalid)
         body = dict(id=claim["id"],token=claim["token"],result=result)
         self.conflict("receive",body=body)
         self.seal_owner(claim,result)
@@ -157,7 +212,7 @@ class IssuePickerTest(unittest.TestCase):
         pending = self.invoke("message",body=msg)
         claim = self.invoke("ownerClaim")
         assigned = self.invoke("preview")
-        result = dict(requestHash=claim["requestHash"],reply="Keep the shipping threshold inclusive.",
+        result = dict(requestHash=claim["requestHash"],assessment=CLEAR_ASSESSMENT,reply="Keep the shipping threshold inclusive.",
                       proposal=dict(goal="Test the boundary",paths=assigned["paths"],checks=assigned["checks"]))
         self.seal_owner(claim,result)
         dbpath = self.directory / "slice.db"
@@ -181,6 +236,7 @@ class IssuePickerTest(unittest.TestCase):
         last, = recovered["messages"]
         self.assertEqual(last["status"],"RecoveredReply")
         self.assertIn(result["reply"],last["reply"])
+        self.assertEqual(last["assessment"],CLEAR_ASSESSMENT)
         self.assertEqual(last["operation"],pending["messages"][0]["operation"])
         self.assertTrue(last["evidenceHash"])
         self.assertIsNone(recovered["scopeApproval"])
@@ -199,7 +255,7 @@ class IssuePickerTest(unittest.TestCase):
         msg = dict(**pins,id=str(uuid.uuid4()),previous=None,text="Wait. Which choice matches the requirement?")
         self.invoke("message",body=msg)
         claim = self.invoke("ownerClaim")
-        result = dict(requestHash=claim["requestHash"],reply="Please tell me which boundary to use.",proposal=None)
+        result = dict(requestHash=claim["requestHash"],assessment=CLEAR_ASSESSMENT,reply="Please tell me which boundary to use.",proposal=None)
         self.seal_owner(claim,result)
         self.invoke("receive",body=dict(id=claim["id"],token=claim["token"],result=result))
         replay = self.invoke("approve",body=manual)
@@ -222,7 +278,7 @@ class IssuePickerTest(unittest.TestCase):
         self.invoke("message",7,msg)
         claim = self.invoke("ownerClaim",7)
         proposal = dict(goal="Improve layout.",paths=["src/app.tsx"],checks=["Show a progress spinner."])
-        result = dict(requestHash=claim["requestHash"],reply="This needs a broader scope.",proposal=proposal)
+        result = dict(requestHash=claim["requestHash"],assessment=CLEAR_ASSESSMENT,reply="This needs a broader scope.",proposal=proposal)
         self.seal_owner(claim,result)
         self.assertTrue(self.invoke("receive",7,dict(id=claim["id"],token=claim["token"],result=result)))
         view = self.invoke("discussion",7)

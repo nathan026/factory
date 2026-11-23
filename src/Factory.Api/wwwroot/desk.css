@@ -610,3 +610,14 @@ textarea {
   overflow-y: auto;
   overflow-wrap: anywhere;
 }
+
+.scope-readiness {
+  margin: 0.75rem 0 1rem;
+  padding: 0.8rem 1rem;
+  background: #191a1f;
+  border-inline-start: 3px solid #ff8700;
+  overflow-wrap: anywhere;
+}
+.scope-readiness p, .scope-readiness ul {
+  margin-block: 0.35rem 0.65rem;
+}

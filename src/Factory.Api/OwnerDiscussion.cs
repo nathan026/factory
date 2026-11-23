@@ -80,7 +80,7 @@ public sealed partial class TaskStore
         if (!liveOwner)
             return exchange with { Status = "Unavailable", Reply = "Subscription-backed owner discussion is disabled on this deployment." };
         var question = new OwnerQuestion(taskId,ownerId,messageId,text,baseSha,1,checkpoint,
-            new(OwnerQuestion.Path, Wire.Digest(contextJson), contextJson), ScopePlanning: new(baseSha,files));
+            new(OwnerQuestion.Path, Wire.Digest(contextJson), contextJson), ScopePlanning: new(baseSha,files,RequireAssessment: true));
         if (ownerId != task.OwnerId || ciProfile?.Rules.RepositoryLayout is not { } layout ||
             !files.All(f => layout.Paths.Contains(f.Path)))
             throw new CommandConflict("The planning owner or its read permissions changed.");
@@ -112,7 +112,7 @@ public sealed partial class TaskStore
         !(task.Activity == Activity.Waiting && task.Question is { Reserved: true }) &&
         OwnerQuestion.Capture(task, question.MessageId, question.Text) == question;
 
-    private static void FinishDiscussion(Session s, string id, string status, string reply, string? evidence = null, ScopeProposal? proposal = null)
+    private static void FinishDiscussion(Session s, string id, string status, string reply, string? evidence = null, ScopeProposal? proposal = null, ScopeAssessment? assessment = null)
     {
         var raw = s.Text("""
             SELECT d.exchange FROM task_discussion d JOIN discussion_jobs j ON j.task_id=d.task_id AND j.message_id=d.message_id
@@ -120,7 +120,7 @@ public sealed partial class TaskStore
             """, ("id",id));
         if (raw is null) return;
         var prior = JsonSerializer.Deserialize<Discussion>(raw, Wire.Json)!;
-        var saved = prior with { Status = status, Reply = reply, EvidenceHash = evidence, Proposal = proposal };
+        var saved = prior with { Status = status, Reply = reply, EvidenceHash = evidence, Proposal = proposal, Assessment = assessment };
         s.Execute("UPDATE task_discussion SET exchange=@exchange WHERE message_id=@msg AND task_id=(SELECT task_id FROM discussion_jobs WHERE operation=@id)",
             ("exchange",Encode(saved)), ("msg",prior.Id.ToString()), ("id",id));
         s.Execute("UPDATE discussion_jobs SET pending=0 WHERE operation=@id", ("id",id));
@@ -174,12 +174,18 @@ public sealed partial class TaskStore
         {
             var result = output.Deserialize<ScopeReply>(Wire.ResultJson)!;
             var proposal = result.Proposal;
-            if (proposal is not null && !proposal.Valid())
-                FinishDiscussion(s, order.Id, "NeedsScope", result.DiscussionText(), GateInput.Hash(question));
+            var assessment = result.ReadAssessment();
+            var requestHash = GateInput.Hash(question);
+            if (assessment is null && (question.ScopePlanning.RequireAssessment || result.Assessment.ValueKind != JsonValueKind.Undefined))
+                FinishDiscussion(s, order.Id, "NeedsAssessment", result.DiscussionText(), requestHash);
+            else if (assessment?.HasOpenItems() == true)
+                FinishDiscussion(s, order.Id, "Answered", result.DiscussionText(), requestHash, assessment: assessment);
+            else if (proposal is not null && !proposal.Valid())
+                FinishDiscussion(s, order.Id, "NeedsScope", result.DiscussionText(), requestHash, assessment: assessment);
             else
             {
                 if (proposal is not null) SaveOwnerProposal(s, question, proposal);
-                FinishDiscussion(s, order.Id, "Answered", result.Reply, GateInput.Hash(question), proposal);
+                FinishDiscussion(s, order.Id, "Answered", result.Reply, requestHash, proposal, assessment);
             }
         }
         else

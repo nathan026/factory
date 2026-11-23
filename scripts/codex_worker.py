@@ -109,6 +109,20 @@ def turn_packet(workspace, order, bindings):
                         "properties":{"goal":{"type":"string"},"paths":strings,"checks":strings}}
             schema = {"type":"object","additionalProperties":False,"required":["reply","proposal"],
                       "properties":{"reply":{"type":"string"},"proposal":{"anyOf":[proposal,{"type":"null"}]}}}
+            assessment_instruction = ""
+            if question["scopePlanning"].get("requireAssessment"):
+                schema["required"].append("assessment")
+                schema["properties"]["assessment"] = {
+                    "type":"object","additionalProperties":False,"required":["investigations","decisions"],
+                    "properties":{"investigations":strings,"decisions":strings}}
+                assessment_instruction = (
+                    " Prepare this issue for the factory to start. Read the pinned sources to resolve what you can this turn. "
+                    "In your reply summarize the issue, your findings, and the next step. Update the assessment from the "
+                    "current issue and conversation. In investigations list concrete remaining work for the owner to "
+                    "investigate, including any missing evidence. In decisions list specific choices only the operator "
+                    "can make. Remove items that have been resolved. Give at most 8 items per list, 400 characters each. "
+                    "Use empty lists when nothing remains. While either list has items, return proposal null. "
+                    "When investigation and decisions are complete, return the proposed work scope and checks.")
             prompt = {"message":question["text"],"issueAndConversation":question["evidence"]["path"],
                       "repositoryFiles":[f["path"] for f in question["scopePlanning"]["files"]],
                       "revision":question["scopePlanning"]["baseSha"]}
@@ -123,7 +137,7 @@ def turn_packet(workspace, order, bindings):
                 "an unrelated policy. You may propose additional paths or checks but identify the permission or verifier needed. "
                 "List only exact repository-relative filenames in paths. If more inspection is needed to identify them, "
                 "explain the needed read access in reply and return proposal null. Submitting a proposal does not grant access "
-                "or execute work. At most 16 paths and 16 checks; no shell commands.")
+                "or execute work. At most 16 paths and 16 checks; no shell commands." + assessment_instruction)
         schema = {"type":"object","additionalProperties":False,"required":["fact"],"properties":{"fact":{"type":"integer"}}}
         prompt = {"question":order["discussion"]["text"],"documents":workspace.paths}
         return schema, prompt, ("Answer from the task's accepted record. Read the JSON array in the listed document. "
@@ -327,6 +341,8 @@ def run(order,cancel,dispatch_deadline,session=None):
                     if not any((f["path"], f["digest"]) in reads for f in files):
                         raise ValueError("Owner scope planning requires an observed repository read")
                     envelope = {"reply":reply["reply"],"proposal":reply["proposal"],"requestHash":policy}
+                    if order["discussion"]["scopePlanning"].get("requireAssessment"):
+                        envelope["assessment"] = reply.get("assessment")
                 else:
                     fact = reply["fact"]
                     if type(fact) is not int or not -1 <= fact < len(json.loads(evidence["content"])):

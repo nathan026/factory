@@ -107,7 +107,7 @@ public sealed partial class TaskStore
         var reply = CodexEvidence.HistoricalScopeReply(order,row.GetString(2),Math.Min(row.GetInt64(3),row.GetInt64(4)));
         if (reply is null) return;
         row.Close();
-        var history = exchange with { Status="RecoveredReply", Reply=reply.DiscussionText(), EvidenceHash=GateInput.Hash(q), Proposal=null };
+        var history = exchange with { Status="RecoveredReply", Reply=reply.DiscussionText(), EvidenceHash=GateInput.Hash(q), Proposal=null, Assessment=reply.ReadAssessment() };
         s.Execute("UPDATE task_discussion SET exchange=@doc WHERE task_id=@task AND message_id=@message",
             ("doc",Encode(history)),("task",planning.TaskId.ToString()),("message",exchange.Id.ToString()));
     }
@@ -163,7 +163,7 @@ public sealed partial class TaskStore
         var previous = GetScope(s,pins.RepositoryId,pins.Number);
         var context = Encode(new { issue = new {pins.Number,pins.Title,pins.Body,pins.BaseSha}, allowedFiles=pins.Paths,
             automatedChecks=pins.Checks, savedObjective=previous?.Request.Goal, savedFiles=previous?.Request.Paths, savedChecks=previous?.Request.Checks,
-            transcript=entries.Select(e=>new {e.Text,e.Reply,e.Status,e.Proposal}) });
+            transcript=entries.Select(e=>new {e.Text,e.Reply,e.Status,e.Proposal,e.Assessment}) });
         if (Encoding.UTF8.GetByteCount(context) > 48*1024)
             throw new CommandConflict("The issue and conversation exceed the owner context limit. Shorten the GitHub issue or finish the scope in the editor.");
         var checkpoint = GateInput.Hash(new { taskId=task.Id,task.OwnerId,pins,messageId=message.Id,context });

@@ -9,13 +9,14 @@ import sys
 import tempfile
 import time
 from threading import Event, Thread
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 from uuid import uuid4
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/"scripts"))
-from codex_worker import CLI, environment, turn
+from codex_worker import CLI, environment, turn, turn_packet
 from codex_workspace import Workspace
 from environment_leases import Leases, fingerprint
 from m0_lease_tool import tool_server
@@ -82,6 +83,24 @@ def scripted_provider(steps, tools, markers, on_finish=None):
 
 
 class TransportTest(unittest.TestCase):
+    def test_scope_planning_packet_requests_current_assessment_only_for_new_turns(self):
+        planning = {"baseSha":"a"*40,"files":[{"path":"desk.css"}]}
+        question = {"text":"Prepare this issue.","evidence":{"path":"owner/accepted.json"},"scopePlanning":planning}
+        workspace = SimpleNamespace(role="owner")
+        legacy, _, _ = turn_packet(workspace, {"discussion":question}, {})
+        self.assertEqual(legacy["required"],["reply","proposal"])
+        planning["requireAssessment"] = True
+        schema, prompt, instruction = turn_packet(workspace, {"discussion":question}, {})
+        self.assertIn("assessment",schema["required"])
+        assessment = schema["properties"]["assessment"]
+        self.assertFalse(assessment["additionalProperties"])
+        for field in ["investigations","decisions"]:
+            self.assertIn(field,assessment["required"])
+            self.assertEqual(assessment["properties"][field],{"type":"array","items":{"type":"string"}})
+        self.assertEqual(prompt["repositoryFiles"],["desk.css"])
+        self.assertIn("Read the pinned sources",instruction)
+        self.assertIn("return proposal null",instruction)
+
     def test_fresh_native_cli_tools_with_unsigned_provider(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
