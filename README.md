@@ -2,6 +2,8 @@
 
 AI Coding Factory runs repository tasks through a persistent lifecycle owner, scoped implementation workers, independent verification and fresh review. The owner retains requirements and decisions across phases. A reviewed candidate can be submitted as a Draft PR for a human to consider.
 
+The [project requirements and acceptance tests](docs/project-plan.md) define the scope of the factory.
+
 ## Run the local task desk
 
 On Windows, install the .NET 10 SDK, Node.js 22 with npm, Python 3 and PowerShell. In PowerShell from the repository root, run the following command.
