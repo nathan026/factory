@@ -1,3 +1,4 @@
+import { WriterRecovery } from "./writer-recovery";
 import { GitHubIssueForm } from "./issue-picker";
 import { ReviseRound } from "./revise-round";
 import React, { useCallback, useEffect, useState } from "react";
@@ -417,7 +418,8 @@ function Desk({ api, signOut }: { api: Api; signOut: () => void }) {
                 </section>
               )}
               {detailError && <p role="alert">{detailError} · Reconnecting…</p>}
-              {task.recovery && (
+              {task.writerRestart && <WriterRecovery key={task.recovery?.operationId} task={task} api={api} ready={ready} update={update} />}
+              {task.recovery && !task.writerRestart && (
                 <RecoverOperation
                   key={task.recovery.operationId}
                   id={id}

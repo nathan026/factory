@@ -58,7 +58,7 @@ internal static class BlockedRevisionChecks
             var archived = JsonSerializer.Deserialize<WorkItem>(archive!,Wire.Json)!;
             if (GateInput.Hash(archived.Receipts) != GateInput.Hash(task.Receipts) || archived.Candidate != task.Candidate)
                 throw new Exception("The failed candidate or evidence was lost.");
-            CheckDispatch(store,project,command);
+            CheckDispatch(store,project,command,nextOrigin,directory);
             Console.WriteLine("Passed: blocked verification holds until approval, rejects stale inputs, preserves the failed round and admits the new paths after restart");
         }
         finally
@@ -68,7 +68,7 @@ internal static class BlockedRevisionChecks
         }
     }
 
-    private static void CheckDispatch(TaskStore store, HostedRepositoryProject project, RevisionCommand approval)
+    private static void CheckDispatch(TaskStore store, HostedRepositoryProject project, RevisionCommand approval, IssueOrigin origin, string directory)
     {
         List<WorkAction> actions = [];
         for (int i = 0; i < 12; i++)
@@ -88,11 +88,56 @@ internal static class BlockedRevisionChecks
                     order.Context.FollowUp.PolicyHash != approval.PolicyHash ||
                     !paths.ToHashSet().SetEquals(project.Ci.Rules.RepositoryLayout!.Writable))
                     throw new Exception("Writer did not receive the approved base, policy and two-file scope.");
+                if (!store.Failed(id,scheduler)) throw new Exception("Expected the writer to park.");
+                CheckWriterRecovery(store,order,origin,directory);
                 return;
             }
             store.Receive(id,claim.Token,order.Execute(project));
         }
         throw new Exception("The approved task did not reach implementation.");
+    }
+
+    private static void CheckWriterRecovery(TaskStore store,WorkOrder order,IssueOrigin origin,string directory)
+    {
+        var taskId=order.Assignment.TaskId;
+        var run=order.Assignment.RunId;
+        var journal=Path.Combine(directory,"interrupted-lease.db");
+        var before=Environment.GetEnvironmentVariable("FACTORY_LEASE_DB");
+        Environment.SetEnvironmentVariable("FACTORY_LEASE_DB",journal);
+        try
+        {
+            using var connection=new Microsoft.Data.Sqlite.SqliteConnection("Data Source="+journal);
+            connection.Open();
+            using var sql=connection.CreateCommand();
+            sql.CommandText="""
+                CREATE TABLE codex_attempts(task,run,generation,action,status,ended,result,policy,source);
+                CREATE TABLE leases(task,run,generation,role,operation,state,policy,outcome_hash);
+                INSERT INTO codex_attempts VALUES($task,$run,'g','Implement','interrupted',1,NULL,$policy,$source);
+                INSERT INTO leases VALUES($task,$run,'g','writer','Implement','active',$policy,NULL);
+                """;
+            sql.Parameters.AddWithValue("$task",taskId.ToString());
+            sql.Parameters.AddWithValue("$run",run.ToString());
+            sql.Parameters.AddWithValue("$policy",origin.PolicyHash!);
+            sql.Parameters.AddWithValue("$source",origin.SourceHash);
+            sql.ExecuteNonQuery();
+            try { store.InspectWriter(taskId,origin.RepoId,origin.Number); throw new Exception("Live lease accepted."); }
+            catch (CommandConflict) {}
+            sql.CommandText="UPDATE leases SET state='released'";
+            sql.ExecuteNonQuery();
+            var (_,_,hold)=store.InspectWriter(taskId,origin.RepoId,origin.Number);
+            var newBase=new string('e',40);
+            var approval=new WriterRestart(taskId,hold.OperationId,hold.GateSequence,origin.BaseSha,newBase,origin.PolicyHash!);
+            var moved=origin with {BaseSha=newBase, BaseTree=new string('f',40)};
+            try {store.ReplanWriter(approval,moved,order.Source with {Source="different"}); throw new Exception("Changed file accepted.");}
+            catch (CommandConflict) {}
+            store.ReplanWriter(approval,moved,order.Source);
+            var resumed=store.List().Single();
+            if (resumed.Phase!=Phase.Planning || resumed.Activity!=Activity.Queued || resumed.FollowUp?.BaseSha!=newBase ||
+                resumed.Candidate is not null || resumed.OwnerId!=order.Context!.OwnerId || resumed.Id!=taskId ||
+                store.GitHubStatusFor(origin.RepoId,origin.Number).Origin!=moved)
+                throw new Exception("Writer recovery did not start a clean round on the approved base.");
+        }
+        finally { Environment.SetEnvironmentVariable("FACTORY_LEASE_DB",before); }
     }
 
     private static IssueOrigin SeedFailure(FactoryDatabase db, WorkItem task, CiProfile old)

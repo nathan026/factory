@@ -203,6 +203,8 @@ if (project.Ci is not null)
 }
 if (github is not null)
 {
+    app.MapGet("/api/github/issues/{number:int}/writer-recovery", (int number, Guid taskId) => github.WriterRecovery(number,taskId));
+    app.MapPost("/api/github/issues/{number:int}/writer-recovery", (int number, WriterRestart command) => github.RestartWriter(number,command));
     app.MapGet("/api/github/issues/{number:int}/revision", (int number, Guid taskId) => github.PreviewRevision(number,taskId));
     app.MapPost("/api/github/issues/{number:int}/revision", (int number, RevisionCommand command) => github.ResumeRevision(number,command));
     app.MapGet("/api/github/issues/{number:int}/actions", (int number, Guid taskId, string headSha) =>
@@ -256,8 +258,10 @@ app.MapPost("/api/tasks", (HttpRequest request, Create body) =>
         : CommandResponse(request, store.Create(body.Id, body.Scenario, string.IsNullOrWhiteSpace(body.Message) ? null : body.Message.Trim())));
 app.MapPost("/api/tasks/{id:guid}/decision", (HttpRequest request, Guid id, Choice body) =>
     CommandResponse(request, store.Decide(id, body.Value, body.QuestionKey)));
-app.MapPost("/api/tasks/{id:guid}/recover", (HttpRequest request, Guid id, RecoveryCommand body) =>
-    CommandResponse(request, store.Recover(id, body)));
+app.MapPost("/api/tasks/{id:guid}/recover", async (HttpRequest request, Guid id, RecoveryCommand body) => {
+    if (github is not null) await github.CheckRecoveryBase(id);
+    return CommandResponse(request, store.Recover(id, body));
+});
 if (hatchet)
 {
     var dispatch = app.MapGroup("/internal/dispatch");

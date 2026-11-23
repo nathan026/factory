@@ -168,7 +168,9 @@ public sealed partial class TaskStore
         return true;
     });
 
-    public WorkItem Recover(Guid id, RecoveryCommand command) => database.Write(s =>
+    public WorkItem Recover(Guid id, RecoveryCommand command) => database.Write(s => Recover(s, id, command));
+
+    private WorkItem Recover(Session s, Guid id, RecoveryCommand command)
     {
         if (string.IsNullOrWhiteSpace(command.Note) || command.Note.Length > 2000 ||
             string.IsNullOrWhiteSpace(command.OperationId) || command.GateSequence < 1)
@@ -226,5 +228,5 @@ public sealed partial class TaskStore
             ("op", operation), ("resolution", Encode(command)));
         Save(s, task);
         return task;
-    });
+    }
 }
