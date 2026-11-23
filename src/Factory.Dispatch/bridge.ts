@@ -49,7 +49,7 @@ const executionSeconds = 60; // The installed Hatchet execution limit, shared wi
 async function execute({order, workerMode}: Claim, signal: AbortSignal, deadline: number, sessionId: string): Promise<JsonObject> {
     // The deterministic proposal and review metadata use the existing fixture contracts.
     const env = Object.fromEntries(Object.entries(process.env).filter(([key]) =>
-        ["path", "systemroot", "temp", "tmp", "dotnet_root"].includes(key.toLowerCase())));
+        ["path", "systemroot", "temp", "tmp", "dotnet_root", "factory_followup_approvals"].includes(key.toLowerCase())));
     if (workerMode !== "codex-subscription" && workerMode !== "controlled")
         throw new Error("Missing or unsupported controller worker mode.");
     if (workerMode === "controlled" && order.action !== "Implement" && order.action !== "Review")
