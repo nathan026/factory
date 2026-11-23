@@ -91,3 +91,15 @@ CREATE TABLE IF NOT EXISTS slack_notices (
     notice TEXT NOT NULL, state TEXT NOT NULL, attempts INTEGER NOT NULL, retry_at BIGINT,
     message_ts TEXT, actor TEXT, choice TEXT, UNIQUE(task_id,event_key)
 );
+CREATE TABLE IF NOT EXISTS github_issue_actions (
+    task_id TEXT NOT NULL REFERENCES tasks(id), head_sha TEXT NOT NULL, id TEXT NOT NULL,
+    kind TEXT NOT NULL, scope TEXT NOT NULL, base_sha TEXT NOT NULL, stage TEXT NOT NULL,
+    body TEXT NOT NULL, comment_id TEXT, archived_task TEXT NOT NULL, intent TEXT NOT NULL,
+    origin TEXT NOT NULL, draft TEXT NOT NULL, ci_total INTEGER NOT NULL, sequence INTEGER NOT NULL, owns_branch INTEGER NOT NULL,
+    PRIMARY KEY(id)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS github_current_issue_action ON github_issue_actions(task_id,head_sha) WHERE stage <> 'withdrawn';
+CREATE TABLE IF NOT EXISTS github_branch_cleanup (
+    action_id TEXT NOT NULL REFERENCES github_issue_actions(id), branch TEXT NOT NULL, result TEXT,
+    PRIMARY KEY(action_id,branch)
+);

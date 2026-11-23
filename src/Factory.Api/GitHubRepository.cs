@@ -11,7 +11,7 @@ namespace Factory;
 public record ApprovedIssue(int Number, long Id, string ScopeHash, string Scenario);
 public record HostedGitHubApproval(string BaseBranch, ApprovedIssue Issue);
 public record GitHubProject(string Repository, long RepositoryId, string BaseBranch, ApprovedIssue[] Issues,
-    string ApiUrl = "https://api.github.com", bool LocalAtomicDraft = false, bool OperatorStart = false)
+    string ApiUrl = "https://api.github.com", bool LocalAtomicDraft = false, bool OperatorStart = false, string? IssueActionBot = null)
 {
     // Set only after the controller verifies the installed policy against its intake file.
     internal ApprovedIssue? HostedIssue { get; private init; }
@@ -30,6 +30,8 @@ public record GitHubProject(string Repository, long RepositoryId, string BaseBra
             && IPAddress.IsLoopback(ip) && url.AbsolutePath == "/" && url.Query == "" && url.Fragment == "" && url.UserInfo == ""))
             throw new InvalidDataException("Use the GitHub API or a loopback qualification endpoint.");
         if (config.LocalAtomicDraft && !url.IsLoopback) throw new InvalidDataException("Atomic Drafts require the local Git provider.");
+        if (config.IssueActionBot is { } bot && !Regex.IsMatch(bot, @"\A[a-zA-Z0-9-]+\[bot\]\z"))
+            throw new InvalidDataException("Issue actions require the installed app bot login.");
         var ci = project.Ci;
         if (ci?.Rules.HostedGitHub is not null && !ci.RequiresCodex)
             throw new InvalidDataException("Hosted factory admission requires live Codex workers.");
@@ -55,10 +57,13 @@ public record GitHubProject(string Repository, long RepositoryId, string BaseBra
 }
 
 public sealed class UnknownPublication(string message) : CommandConflict(message);
-public sealed class GitHubFailure(string message) : Exception(message);
+public sealed class GitHubFailure(string message, bool rejectedWrite = false) : Exception(message)
+{
+    public bool RejectedWrite { get; } = rejectedWrite;
+}
 
-// Only the publisher has this client. Its write surface is immutable objects, a new task ref and a Draft PR.
-public sealed class GitHubRepository : IDisposable
+// The trusted controller owns this client. Model workers do not receive its credentials.
+public sealed partial class GitHubRepository : IDisposable
 {
     private readonly HttpClient http;
     private readonly GitHubProject config;
@@ -82,10 +87,10 @@ public sealed class GitHubRepository : IDisposable
         if (!http.BaseAddress.IsLoopback)
         {
             var token = Environment.GetEnvironmentVariable("FACTORY_GITHUB_TOKEN");
-            installation = GitHubAppInstallation.FromEnvironment(http, config.RepositoryId);
+            installation = GitHubAppInstallation.FromEnvironment(http, config.RepositoryId, config.IssueActionBot is not null);
             if (!string.IsNullOrEmpty(token))
             {
-                if (installation is not null || config.HostedIssue is not null)
+                if (installation is not null || config.HostedIssue is not null || config.IssueActionBot is not null)
                     throw new InvalidDataException("The hosted factory publisher requires its GitHub App installation.");
                 http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
             }
@@ -93,19 +98,26 @@ public sealed class GitHubRepository : IDisposable
     }
     public void Dispose() => http.Dispose();
 
-    private async Task<JsonNode?> Call(string path, object? body = null, bool allowMissing = false)
+    private async Task<JsonNode?> Call(string path, object? body = null, bool allowMissing = false, HttpMethod? method = null, bool graphql = false)
     {
-        using var request = new HttpRequestMessage(body is null ? HttpMethod.Get : HttpMethod.Post, "repos/" + config.Repository + (path.Length == 0 ? "" : "/" + path));
+        using var request = new HttpRequestMessage(method ?? (body is null ? HttpMethod.Get : HttpMethod.Post),
+            graphql ? "graphql" : "repos/" + config.Repository + (path.Length == 0 ? "" : "/" + path));
         if (installation is not null)
-            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", await installation.AccessToken());
-        else if (config.HostedIssue is not null && body is not null)
-            throw new GitHubFailure("Hosted writes require the configured GitHub App.");
+        {
+            try { request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", await installation.AccessToken()); }
+            catch (Exception e) when (e is GitHubFailure or HttpRequestException or TaskCanceledException)
+            {
+                throw new GitHubFailure("The GitHub App could not obtain a verified installation grant.", rejectedWrite:true);
+            }
+        }
+        else if (!http.BaseAddress!.IsLoopback && (config.HostedIssue is not null || config.IssueActionBot is not null) && body is not null)
+            throw new GitHubFailure("Hosted writes require the configured GitHub App.", rejectedWrite:true);
         if (body is not null) request.Content = JsonContent.Create(body, options: Wire.Json);
         using var response = await http.SendAsync(request);
         if (response.StatusCode == HttpStatusCode.Unauthorized && installation is not null)
             await installation.Rejected(request.Headers.Authorization!.Parameter!);
         if (allowMissing && response.StatusCode == HttpStatusCode.NotFound) return null;
-        if (!response.IsSuccessStatusCode) throw new GitHubFailure($"GitHub returned HTTP {(int)response.StatusCode} for {request.Method} {path}.");
+        if (!response.IsSuccessStatusCode) throw new GitHubFailure($"GitHub returned HTTP {(int)response.StatusCode} for {request.Method} {path}.", (int)response.StatusCode is 401 or 403 or 404 or 422);
         try { return JsonNode.Parse(await response.Content.ReadAsStringAsync()) ?? throw new GitHubFailure("Empty GitHub response."); }
         catch (JsonException) { throw new GitHubFailure("Invalid JSON in the GitHub response."); }
     }
@@ -208,16 +220,37 @@ public sealed class GitHubRepository : IDisposable
         return Convert.ToHexStringLower(SHA1.HashData([..header, ..bytes]));
     }
 
-    public async Task<(string Tree, SourcePacket Source, string Path)> Snapshot(string revision, IControlledProject project, CiProfile? ci = null)
+    private async Task<string> ReadSourceBlob(string oid)
+    {
+        var response = (await Call("git/blobs/" + oid))!;
+        if (Sha(response["sha"]) != oid || (string?)response["encoding"] != "base64" ||
+            (string?)response["content"] is not { Length: <= 90000 } encoded)
+            throw new GitHubFailure("Incomplete or oversized admitted source blob.");
+        try
+        {
+            var bytes = Convert.FromBase64String(encoded);
+            var text = new UTF8Encoding(false, true).GetString(bytes);
+            if (bytes.Length > 65536 || Blob(text) != oid)
+                throw new CommandConflict("Fetched file differs from the admitted Git revision.");
+            return text;
+        }
+        catch (Exception e) when (e is FormatException or DecoderFallbackException)
+        {
+            throw new CommandConflict("The admitted source is not a UTF-8 Git blob.");
+        }
+    }
+
+    public async Task<(string Tree, SourcePacket Source, string Path)> Snapshot(string revision, IControlledProject project, CiProfile? ci = null, bool followUp = false)
     {
         var commit = (await Call("git/commits/" + revision))!;
         if (Sha(commit["sha"]) != revision) throw new CommandConflict("Base commit identity changed.");
         var tree = Sha(commit["tree"]?["sha"]);
         if (project is Factory.Fixtures.FactorySummaryProject || project.Ci?.Rules.RepositoryLayout is not null)
         {
-            if (revision != project.Ci!.Rules.Settings.GetProperty("base").GetString())
+            if (!followUp && revision != project.Ci!.Rules.Settings.GetProperty("base").GetString())
                 throw new CommandConflict("Factory source differs from the approved revision.");
             var snapshot = project.Snapshot();
+            if (followUp && project is not HostedRepositoryProject) throw new CommandConflict("Unsupported follow-up project layout.");
             var documents = project.Describe(snapshot).Documents;
             foreach (var doc in documents)
             {
@@ -230,24 +263,24 @@ public sealed class GitHubRepository : IDisposable
                         throw new CommandConflict("Missing admitted source: " + doc.Path);
                     if (index == parts.Length - 1)
                     {
-                        if (item != new TreeEntry("100644", "blob", Blob(snapshot.Content(doc.Part, doc.Path))))
+                        if (item.Mode != "100644" || item.Type != "blob" || !followUp && item.Sha != Blob(snapshot.Content(doc.Part, doc.Path)))
                             throw new CommandConflict("Factory source bytes or mode differ from admission.");
-                        var response = (await Call("git/blobs/" + item.Sha))!;
-                        if (Sha(response["sha"]) != item.Sha || (string?)response["encoding"] != "base64" ||
-                            (string?)response["content"] is not { Length: <= 90000 } encoded)
-                            throw new GitHubFailure("Incomplete or oversized admitted source blob.");
-                        var data = Convert.FromBase64String(encoded);
-                        var content = new UTF8Encoding(false, true).GetString(data);
-                        if (data.Length > 65536 || Blob(content) != item.Sha)
-                            throw new CommandConflict("Fetched file differs from the admitted Git revision.");
-                        if (content != snapshot.Content(doc.Part, doc.Path))
+                        var content = await ReadSourceBlob(item.Sha);
+                        if (followUp) snapshot = doc.Part switch
+                        {
+                            SourcePart.Source => snapshot with { Source = content },
+                            SourcePart.Decisions => snapshot with { Decisions = content },
+                            SourcePart.Cases => snapshot with { Cases = content },
+                            _ => throw new CommandConflict("Unsupported follow-up path.")
+                        };
+                        else if (content != snapshot.Content(doc.Part, doc.Path))
                             throw new CommandConflict("Fetched content differs from the installed project source.");
                     }
                     else if (item is { Mode: "040000", Type: "tree" }) directory = item.Sha;
                     else throw new CommandConflict("Factory source parent is not a directory.");
                 }
             }
-            return (tree, snapshot, project.Ci.Rules.RepositoryLayout?.Source ?? documents.Single(d => d.Part == SourcePart.Source).Path);
+            return (tree, snapshot, project.Ci!.Rules.RepositoryLayout?.Source ?? documents.Single(d => d.Part == SourcePart.Source).Path);
         }
         var entries = await Tree(tree);
         if (entries.Values.Any(e => e.Mode != "100644" || e.Type != "blob"))
@@ -276,7 +309,7 @@ public sealed class GitHubRepository : IDisposable
         {
             var lf = sample.Content(doc.Part).ReplaceLineEndings("\n");
             if (!files.TryGetValue(doc.Path, out var blob)) throw new CommandConflict("Missing admitted file: " + doc.Path);
-            contents[doc.Part] = new[] { lf, lf.ReplaceLineEndings("\r\n") }.FirstOrDefault(text => Blob(text) == blob)
+            contents[doc.Part] = followUp && doc.Part==SourcePart.Source ? await ReadSourceBlob(blob) : new[] { lf, lf.ReplaceLineEndings("\r\n") }.FirstOrDefault(text => Blob(text) == blob)
                 ?? throw new CommandConflict("Source differs from the qualified fixture: " + doc.Path);
         }
         return (tree, new(contents[SourcePart.Source], contents[SourcePart.Decisions], contents[SourcePart.Cases]),
@@ -302,7 +335,7 @@ public sealed class GitHubRepository : IDisposable
         var identity = new { name = subscriptionWorkers ? "AI Coding Factory" : "Factory fixture", email = "factory@users.noreply.github.com",
             date = intent.OpenedAt.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'") };
         var subject = subscriptionWorkers ? "Reviewed Codex candidate" : "Reviewed fixture candidate";
-        var commit = (await Call("git/commits", new { message = $"{subject} {intent.TaskId:N}", tree,
+        var commit = (await Call("git/commits", new { message = $"{subject} {intent.Branch["factory/".Length..]}", tree,
             parents = new[] { origin.BaseSha }, author = identity, committer = identity }))!;
         if (Sha(commit["tree"]?["sha"]) != tree || commit["parents"] is not JsonArray { Count: 1 } parents || Sha(parents[0]?["sha"]) != origin.BaseSha)
             throw new CommandConflict("Created commit does not match the admitted parent and tree.");

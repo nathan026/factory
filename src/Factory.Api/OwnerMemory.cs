@@ -125,7 +125,9 @@ public record PhaseContext(int SchemaVersion, Guid OwnerId, RunReference Assignm
     [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     BlueprintGrant? Blueprint = null,
     [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
-    WorkerReply? OwnerReply = null);
+    WorkerReply? OwnerReply = null,
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    RoundApproval? FollowUp = null);
 public record OwnerView(Guid TaskId, Guid OwnerId, Phase Phase, Activity Activity, Guid? RunId, WorkAction? PendingAction, string? OperationId, string NextAction,
     string? Plan, List<BriefRevision> Briefs, List<DecisionRecord> Decisions, Question? OpenQuestion, Advice? Advice,
     ProjectPolicy? Policy, SourceDocument[] Documents, VerificationFinding[] Findings);

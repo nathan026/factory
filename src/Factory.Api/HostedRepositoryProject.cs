@@ -33,7 +33,15 @@ public sealed class HostedRepositoryProject : IControlledProject
         [Goal], ["Write only " + layout.Source + "."]),
         [SourceDocument.Capture(SourcePart.Source, layout.Source, source), SourceDocument.Capture(SourcePart.Decisions, layout.Decisions, source),
          SourceDocument.Capture(SourcePart.Cases, layout.Cases, source)]);
-    public WorkerResult<string> Plan(Assignment a, PhaseContext? context) => new(a.Reference(), ResultStatus.Completed, Goal,
+    public ProjectBrief FollowUpBrief(SourcePacket source)
+    {
+        var original = Describe(source);
+        var checks = original.Requirements.Criteria.Select(c => c.Id == "bounded-source" ? c :
+            c with { Text = $"Pass the installed {c.Id} check." }).ToArray();
+        return original with { Requirements = new(checks, ["Use the installed verifier."], original.Requirements.Exclusions) };
+    }
+
+    public WorkerResult<string> Plan(Assignment a, PhaseContext? context) => new(a.Reference(), ResultStatus.Completed, context?.Brief.Goal ?? Goal,
         new(layout.Writable, a.RequiredChecks, [layout.Decisions, layout.Cases], "Preserve behavior outside the approved change.", GateInput.Hash(context!.Brief)));
     public Question AdmittedQuestion(string value) => Supports(value)
         ? new("approved-scope", "Which change and file did the operator approve?", false)

@@ -121,7 +121,8 @@ public sealed partial class TaskStore
             !MatchesReviewSubmission(s, assignment, reviewed, review))
             throw new CommandConflict("Publication requires the original independent review of the verified candidate.");
 
-        return new(task.Id, $"factory/{task.Id:N}", $"<!-- factory-publication:{task.Id:N} -->",
+        var key = task.FollowUp is { } round ? $"{task.Id:N}-{round.Id:N}" : $"{task.Id:N}";
+        return new(task.Id, $"factory/{key}", $"<!-- factory-publication:{key} -->",
             task.Candidate, receipt.CandidateHash, receipt.RunId, reviewed.RunId, GateInput.Hash(review), task.OpenedAt!.Value);
     }
 

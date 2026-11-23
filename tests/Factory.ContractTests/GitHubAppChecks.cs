@@ -16,7 +16,7 @@ static class GitHubAppChecks
     private sealed class Api(RSA key, Clock clock) : HttpMessageHandler
     {
         public int Mints, Checks;
-        public bool ExtraPermission, WrongRepository, Deny;
+        public bool ExtraPermission, WrongRepository, Deny, IssueWrites, ReadOnly;
         private static byte[] Decode(string value) =>
             Convert.FromBase64String(value.Replace('-', '+').Replace('_', '/').PadRight((value.Length + 3) / 4 * 4, '='));
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
@@ -34,8 +34,10 @@ static class GitHubAppChecks
                     throw new Exception("Unexpected signed App identity or validity.");
                 var body = await request.Content!.ReadFromJsonAsync<JsonObject>(ct);
                 var expected = JsonNode.Parse("""{"repository_ids":[123],"permissions":{"contents":"write","pull_requests":"write","issues":"read"}}""");
+                if (IssueWrites) expected!["permissions"]!["issues"]="write";
                 if (!JsonNode.DeepEquals(body, expected)) throw new Exception("Unexpected repository or requested permissions.");
                 var permissions = body!["permissions"]!;
+                if (ReadOnly) permissions["issues"]="read";
                 permissions["metadata"] = "read";
                 if (ExtraPermission) permissions["administration"] = "write";
                 Mints++;
@@ -75,6 +77,13 @@ static class GitHubAppChecks
             app = Start();
             await app.AccessToken();
             if (api.Mints != 4 || api.Checks != 4) throw new Exception("Restart did not independently mint and verify.");
+            api.IssueWrites = true;
+            GitHubAppInstallation IssueApp() => new(http,123,"test-client",41,path,clock,issueWrites:true);
+            await IssueApp().AccessToken();
+            api.ReadOnly = true;
+            try { await IssueApp().AccessToken(); throw new Exception("Read-only grant was accepted for issue writes."); }
+            catch (GitHubFailure) { }
+            api.ReadOnly = api.IssueWrites = false;
             foreach (var failure in new[]{"permissions","repository","revoked"})
             {
                 api.ExtraPermission = failure=="permissions";

@@ -121,6 +121,8 @@ public sealed class WorkItem
     public Advice? Advice { get; set; }
     public Decision? Answer { get; set; }
     public string? HumanChoice { get; set; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public RoundApproval? FollowUp { get; init; }
     public string? Candidate { get; set; }
     public Guid? Writer { get; set; }
     public int Repairs { get; set; }

@@ -57,7 +57,7 @@ if (args is ["--fixture-worker"] or ["--codex-bindings"])
         var finding = order.Context.Findings.LastOrDefault();
         Console.WriteLine(JsonSerializer.Serialize(new { assignment = order.Assignment.Reference(),
             briefHash = GateInput.Hash(order.Context.Brief), checksHash = finding is null ? null : GateInput.Hash(finding),
-            gitRevision = installed.Ci!.Rules.Settings.GetProperty("base").GetString() }, Wire.Json));
+            gitRevision = order.Context.FollowUp?.BaseSha ?? installed.Ci!.Rules.Settings.GetProperty("base").GetString() }, Wire.Json));
     }
     else Console.WriteLine(order.Execute(installed).GetRawText());
     return;
@@ -201,6 +201,10 @@ if (project.Ci is not null)
 }
 if (github is not null)
 {
+    app.MapGet("/api/github/issues/{number:int}/actions", (int number, Guid taskId, string headSha) =>
+        github.IssueActionPreview(number,taskId,headSha));
+    app.MapPost("/api/github/issues/{number:int}/actions/{kind}", (int number,string kind,IssueActionCommand command) =>
+        github.RunIssueAction(number,kind,command));
     app.MapPost("/api/github/issues/{number:int}/sync", (int number) => github.Poll(number));
     if (operatorIntake is not null)
         app.MapPost("/api/github/issues/{number:int}/start", async (int number, IssueStart selection) =>
@@ -223,7 +227,7 @@ funds.MapPost("/advice/{request:guid}/resume", (Guid id, Guid request, AttemptCo
 funds.MapPost("/advice/{request:guid}/cancel", (Guid id, Guid request, AttemptCommand body) => funding.Cancel(id, request, body.Attempt));
 funds.MapPost("/advice/{request:guid}/reconcile", (Guid id, Guid request, AttemptCommand body) => funding.Reconcile(id, request, body.Attempt));
 app.MapGet("/api/dashboard/scenarios", () => new { project.Goal, project.Scenarios, restorePaused,
-    githubIntake = operatorIntake is null ? null : new { operatorIntake.Repository, operatorIntake.RepositoryId, operatorIntake.Issues } });
+    issueActions = github?.IssueActionsEnabled == true, githubIntake = operatorIntake is null ? null : new { operatorIntake.Repository, operatorIntake.RepositoryId, operatorIntake.Issues } });
 app.MapGet("/api/dashboard/queue", store.Queue);
 app.MapGet("/api/tasks/{id:guid}/workspace", (Guid id) => store.Workspace(id));
 app.MapGet("/api/tasks/{id:guid}/export", (Guid id) =>

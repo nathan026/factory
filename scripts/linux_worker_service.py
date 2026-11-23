@@ -11,7 +11,7 @@ from uuid import UUID
 # Only the trusted adapter needs Docker and controller bindings. codex_worker.environment()
 # separately narrows the environment passed to the CLI and its metadata probe.
 SERVICE_ENV = ("PATH", "HOME", "CODEX_HOME", "XDG_RUNTIME_DIR", "DOCKER_HOST",
-               "DOCKER_CONTEXT", "DOCKER_CONFIG", "FACTORY_CONTROLLER_RELEASE",
+               "DOCKER_CONTEXT", "DOCKER_CONFIG", "FACTORY_CONTROLLER_RELEASE", "FACTORY_FOLLOWUP_APPROVALS",
                "FACTORY_LEASE_DB", "FACTORY_MAX_LEASES", "FACTORY_OPERATION_TIMING")
 
 

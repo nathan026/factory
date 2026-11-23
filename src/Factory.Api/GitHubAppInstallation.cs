@@ -7,14 +7,14 @@ using System.Text.Json.Nodes;
 namespace Factory;
 
 internal sealed class GitHubAppInstallation(HttpClient api, long repositoryId, string clientId, long installationId,
-    string keyFile, TimeProvider clock)
+    string keyFile, TimeProvider clock, bool issueWrites = false)
 {
     private readonly SemaphoreSlim gate = new(1, 1);
     private string? token;
     private DateTimeOffset expires;
     private static readonly TimeSpan RenewalMargin = TimeSpan.FromMinutes(5);
 
-    public static GitHubAppInstallation? FromEnvironment(HttpClient api, long repositoryId)
+    public static GitHubAppInstallation? FromEnvironment(HttpClient api, long repositoryId, bool issueWrites = false)
     {
         var client = Environment.GetEnvironmentVariable("FACTORY_GITHUB_APP_CLIENT_ID");
         var id = Environment.GetEnvironmentVariable("FACTORY_GITHUB_APP_INSTALLATION_ID");
@@ -25,7 +25,7 @@ internal sealed class GitHubAppInstallation(HttpClient api, long repositoryId, s
         if (string.IsNullOrWhiteSpace(client) || !long.TryParse(id, out var installation) || installation <= 0 ||
             key is null || !Path.IsPathFullyQualified(key) || api.BaseAddress?.AbsoluteUri != "https://api.github.com/")
             throw new InvalidDataException("Incomplete GitHub App installation configuration.");
-        return new(api, repositoryId, client, installation, key, TimeProvider.System);
+        return new(api, repositoryId, client, installation, key, TimeProvider.System, issueWrites);
     }
 
     private string AppJwt(DateTimeOffset now)
@@ -50,14 +50,14 @@ internal sealed class GitHubAppInstallation(HttpClient api, long repositoryId, s
             using var mint = new HttpRequestMessage(HttpMethod.Post, $"app/installations/{installationId}/access_tokens");
             mint.Headers.Authorization = new AuthenticationHeaderValue("Bearer", AppJwt(now));
             mint.Content = JsonContent.Create(new { repository_ids = new[] {repositoryId},
-                permissions = new { contents = "write", pull_requests = "write", issues = "read" } });
+                permissions = new { contents = "write", pull_requests = "write", issues = issueWrites ? "write" : "read" } });
             using var response = await api.SendAsync(mint);
             if (!response.IsSuccessStatusCode) throw new GitHubFailure($"GitHub App token issuance returned HTTP {(int)response.StatusCode}.");
             var grant = await response.Content.ReadFromJsonAsync<JsonObject>();
             if (grant?["token"]?.GetValue<string>() is not { Length: > 0 } issued ||
                 grant["expires_at"]?.GetValue<DateTimeOffset>() is not { } expiry || expiry <= now + RenewalMargin ||
                 grant["permissions"] is not JsonObject p || (string?)p["contents"] != "write" ||
-                (string?)p["pull_requests"] != "write" || (string?)p["issues"] != "read" ||
+                (string?)p["pull_requests"] != "write" || (string?)p["issues"] != (issueWrites ? "write" : "read") ||
                 p.Any(k => k.Key is not ("contents" or "pull_requests" or "issues") && !(k.Key == "metadata" && (string?)k.Value == "read")))
                 throw new GitHubFailure("GitHub App returned an invalid or unexpected token grant.");
 

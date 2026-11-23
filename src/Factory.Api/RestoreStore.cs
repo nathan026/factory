@@ -37,6 +37,8 @@ public sealed partial class TaskStore
             SELECT 'Publication', task_id FROM github_publications
             WHERE receipt IS NULL AND (ref_attempted<>0 OR pr_attempted<>0)
             UNION ALL
+            SELECT 'Issue action', id FROM github_issue_actions WHERE stage IN ('posting','commented','closing','closed')
+            UNION ALL
             SELECT 'Funding', request_id FROM funding_attempts WHERE state IN ('InFlight','Unconfirmed','CancelPending')
             ORDER BY 1,2
             """);
