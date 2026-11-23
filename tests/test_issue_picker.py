@@ -125,6 +125,31 @@ class IssuePickerTest(unittest.TestCase):
         self.assertIn(message["text"],str(plan["context"]["brief"]["requirements"]["constraints"]))
         self.assertEqual(self.git.writes,[])
 
+    def test_old_manual_approval_cannot_bypass_owner_clarification(self):
+        view = self.invoke("preview")
+        pins = {k:view[k] for k in ("repositoryId","issueId","issueHash","baseSha","policyHash")}
+        manual = dict(**pins,goal="Use the earlier manual objective.",paths=view["paths"],checks=view["checks"],previous=None)
+        old = self.invoke("approve",body=manual)
+        self.assertTrue(old["approvedForExecution"])
+        msg = dict(**pins,id=str(uuid.uuid4()),previous=None,text="Wait. Which choice matches the requirement?")
+        self.invoke("message",body=msg)
+        claim = self.invoke("ownerClaim")
+        result = dict(requestHash=claim["requestHash"],reply="Please tell me which boundary to use.",proposal=None)
+        self.seal_owner(claim,result)
+        self.invoke("receive",body=dict(id=claim["id"],token=claim["token"],result=result))
+        replay = self.invoke("approve",body=manual)
+        self.assertIn("conflict",replay)
+        draft = self.invoke("approve",body={**manual,"previous":old["id"]})
+        self.assertFalse(draft["approvedForExecution"])
+        self.assertFalse(self.invoke("discussion")["canBegin"])
+        preview = self.invoke("preview")
+        self.assertTrue(preview["discussing"])
+        self.assertFalse(preview["canBegin"])
+        for approval in [old,draft]:
+            self.conflict("start",body=dict(repositoryId=view["repositoryId"],issueId=view["issueId"],
+                                           scopeHash=view["issueHash"],scopeApproval=approval["id"]))
+        self.assertEqual(self.invoke("tasks"),[])
+
     def test_request_broader_scope_is_bound_to_owner_turn(self):
         view = self.invoke("discussion",7)
         pins = {k:view[k] for k in ("repositoryId","issueId","issueHash","baseSha","policyHash")}
@@ -142,10 +167,13 @@ class IssuePickerTest(unittest.TestCase):
         self.conflict("approve",7,{**request,"goal":"Change the proposal."})
         saved = self.invoke("approve",7,request)
         self.assertFalse(saved["approvedForExecution"])
-        self.assertEqual(saved["id"],self.invoke("discussion",7)["savedScopeId"])
+        recorded = self.invoke("discussion",7)
+        self.assertEqual(saved["id"],recorded["savedScopeId"])
+        self.assertTrue(recorded["requestRecorded"])
         self.conflict("start",7,dict(repositoryId=view["repositoryId"],issueId=view["issueId"],scopeHash=view["issueHash"],scopeApproval=saved["id"]))
         self.invoke("message",7,{**msg,"id":str(uuid.uuid4()),"previous":msg["id"],"text":"Use a simpler change."})
         self.conflict("approve",7,request)
+        self.assertFalse(self.invoke("discussion",7)["requestRecorded"])
         self.assertEqual(self.invoke("queue"),[])
 
     def test_other_issue_cannot_inherit_or_start_with_copied_policy(self):

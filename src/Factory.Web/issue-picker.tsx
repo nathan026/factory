@@ -7,7 +7,7 @@ type IssuePage = { items: Item[]; nextPage: number | null };
 type Scope = { goal: string; paths: string[]; checks: string[] };
 type Preview = {
   repositoryId: number; issueId: number; issueHash: string; baseSha: string; policyHash: string;
-  assigned: boolean; title: string; body: string | null; paths: string[]; checks: string[]; canBegin: boolean;
+  assigned: boolean; discussing: boolean; title: string; body: string | null; paths: string[]; checks: string[]; canBegin: boolean;
   saved: {id: string; request: Scope} | null;
 };
 type Props = { api: Api; ready: boolean; created: (id:string)=>void; cancel?: ()=>void; intake: GitHubIntake; goal: string };
@@ -134,11 +134,12 @@ function IssueScope({api,ready,item,created}: {api:Api;ready:boolean;item:Item;c
           <ul>{[...preview.paths,...preview.checks].map(s=><li key={s}>{s}</li>)}</ul>
           <button className="secondary" disabled={busy} onClick={()=>{setFiles(preview.paths.join("\n"));setTests(preview.checks.join("\n"));}}>Use the assigned files and checks</button>
         </details> : <p>You can save this checklist. Before work can start, the factory needs approved files and automated checks for issue #{item.number}.</p>}
-        <button disabled={!ready||busy||!goal.trim()||!tests.trim()} onClick={()=>act("save")}>{preview.assigned ? "Approve scope" : "Save checklist"}</button>
+        {preview.discussing && <p>Share changes with the lifecycle owner in the discussion before you begin coding.</p>}
+        <button disabled={!ready||busy||!goal.trim()||!tests.trim()} onClick={()=>act("save")}>{preview.discussing ? "Save draft checklist" : preview.assigned ? "Approve scope" : "Save checklist"}</button>
       </> : <>
         <h2>Saved checklist for issue #{item.number}</h2><p>{goal}</p><ul>{files.split("\n").filter(Boolean).map(p=><li key={p}><code>{p}</code></li>)}</ul>
         <ul>{tests.split("\n").map(c=><li key={c}>{c}</li>)}</ul>
-        <p role="status">{preview.canBegin ? "Scope approved. Ready to begin." : preview.assigned
+        <p role="status">{preview.canBegin ? "Scope approved. Ready to begin." : preview.discussing ? "Draft saved. Continue the discussion with the lifecycle owner." : preview.assigned
           ? "Review the current issue, base revision and assigned checks before starting."
           : `Checklist saved. Work can start after files and automated checks are assigned to issue #${item.number} and you approve the scope.`}</p>
         {preview.canBegin && <button disabled={!ready||busy} onClick={()=>act("start")}>Begin</button>}

@@ -52,6 +52,8 @@ public sealed partial class GitHubSync
 public sealed partial class TaskStore
 {
     internal bool ScopeOwnerAvailable => liveOwner;
+    internal (SavedIssueScope?,ScopeConversation?) ScopePreviewState(long repo,int number) =>
+        database.Read(s => (GetScope(s,repo,number),PlanningFor(s,repo,number)));
     internal bool PlanningAllowsStart(long repo,int number,Guid approval) => database.Read(s =>
         PlanningFor(s,repo,number) is not { } p || p.ExecutionApproval == approval);
     private static ScopeConversation? DecodePlanning(string? raw) =>
@@ -88,7 +90,11 @@ public sealed partial class TaskStore
         var saved = GetScope(s,repo,number);
         bool stale = planning is not null && !planning.Pins.SameRevision(pins);
         bool ready = !stale && planning?.ExecutionApproval is { } approval && approval == saved?.Id;
-        return new { taskId=planning?.TaskId,ownerId=planning?.OwnerId,pins.RepositoryId,pins.IssueId,pins.IssueHash,
+        bool requestRecorded = !stale && saved?.Request.OwnerMessage is { } recorded &&
+            messages.LastOrDefault() is { Status: "Answered", Proposal: not null } last && last.Id == recorded &&
+            saved.Request.IssueId == pins.IssueId && saved.Request.IssueHash == pins.IssueHash &&
+            saved.BaseSha == pins.BaseSha && saved.PolicyHash == pins.PolicyHash;
+        return new { requestRecorded,taskId=planning?.TaskId,ownerId=planning?.OwnerId,pins.RepositoryId,pins.IssueId,pins.IssueHash,
             pins.BaseSha,pins.PolicyHash,pins.Title,pins.Body,messages,proposal=stale ? null : messages.LastOrDefault()?.Proposal,
             savedScopeId=saved?.Id,canBegin=ready,scopeApproval=ready ? saved!.Id : (Guid?)null,assigned=pins.Paths.Length>0,ownerAvailable=liveOwner,stale };
     }

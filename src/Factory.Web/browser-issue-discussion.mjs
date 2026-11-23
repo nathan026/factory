@@ -24,7 +24,7 @@ try {
       assert.equal(body.scopeApproval,"exact"); return {taskId:"same-task"};
     }
     if(path.endsWith("/scope")) {
-      if(body) {assert.deepEqual(body.checks,view.proposal.checks); assert.equal(body.ownerMessage,view.messages.at(-1).id); saves++;}
+      if(body) {assert.deepEqual(body.checks,view.proposal.checks); assert.equal(body.ownerMessage,view.messages.at(-1).id); view.requestRecorded=true; saves++;}
       return {saved:null};
     }
     assert.ok(path.startsWith("github/issues/7/discussion"));
@@ -53,6 +53,7 @@ try {
   await page.getByRole("button",{name:"Discuss issue #7"}).click();
   await page.getByRole("region",{name:"Proposed scope"}).waitFor();
   assert.equal(sends,1);
+  assert.equal(await page.getByRole("button",{name:"Record scope request"}).count(),0);
   await page.getByLabel("Message the lifecycle owner").fill("Use the narrower approved layout change.");
   await page.getByRole("button",{name:"Send message"}).click();
   await page.getByRole("button",{name:"Begin coding"}).click();

@@ -57,11 +57,10 @@ public sealed partial class TaskStore
                     planning.Pins.PolicyHash != request.PolicyHash || planning.Pins.BaseSha != request.BaseSha ||
                     proposal.Goal != request.Goal || !proposal.Paths.SequenceEqual(request.Paths) || !proposal.Checks.SequenceEqual(request.Checks))
                     throw new CommandConflict("The owner proposal changed. Reopen the issue before recording the request.");
-                approvedForExecution = false;
             }
-            var saved = SaveScope(s,number,request,approvedForExecution);
-            if (planning is not null)
-                PersistPlanning(s,planning with { ExecutionApproval = approvedForExecution ? saved.Id : null });
+            var saved = SaveScope(s,number,request,approvedForExecution && planning is null);
+            if (planning?.ExecutionApproval is not null)
+                PersistPlanning(s,planning with { ExecutionApproval = null });
             return saved;
         });
 
@@ -138,12 +137,12 @@ public sealed partial class GitHubSync
     public async Task<object> ScopePreview(int number)
     {
         var (issue,hash,revision)=await ScopeInputs(number);
-        var saved=store.ScopeFor(config.RepositoryId,number);
+        var (saved,planning)=store.ScopePreviewState(config.RepositoryId,number);
         var assigned=PolicyAssigned(number,(long)issue["id"]!,hash);
         var current=assigned && saved is { ApprovedForExecution: true } && saved.Request.IssueId==(long)issue["id"]! && saved.Request.IssueHash==hash &&
-            saved.BaseSha==revision && MatchesInstalled(saved.Request) && store.PlanningAllowsStart(config.RepositoryId,number,saved.Id);
+            saved.BaseSha==revision && MatchesInstalled(saved.Request) && (planning is null || planning.ExecutionApproval==saved.Id);
         return new {repositoryId=config.RepositoryId,issueId=(long)issue["id"]!,issueHash=hash,baseSha=revision,policyHash=ci!.Hash,
-            title=(string?)issue["title"],body=(string?)issue["body"],assigned,
+            title=(string?)issue["title"],body=(string?)issue["body"],assigned,discussing=planning is not null,
             paths=assigned ? InstalledPaths : [],checks=assigned ? InstalledChecks : [],saved,canBegin=current};
     }
 

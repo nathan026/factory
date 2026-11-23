@@ -6,7 +6,7 @@ type Message = {id: string; text: string; reply: string; status: string};
 type Conversation = {
   repositoryId: number; issueId: number; issueHash: string; baseSha: string; policyHash: string;
   ownerAvailable: boolean; stale: boolean; messages: Message[]; proposal: Proposal | null;
-  canBegin: boolean; scopeApproval: string | null; savedScopeId: string | null;
+  canBegin: boolean; scopeApproval: string | null; savedScopeId: string | null; requestRecorded: boolean;
 };
 
 export function IssueDiscussion({api, number, ready, created}: {
@@ -17,7 +17,6 @@ export function IssueDiscussion({api, number, ready, created}: {
   const [text,setText] = useState("");
   const [busy,setBusy] = useState(false);
   const [error,setError] = useState("");
-  const [recorded,setRecorded] = useState(false);
   const [refresh,setRefresh] = useState(0);
   const retry = useRef<{id:string; text:string; previous:string|null; issueHash:string; baseSha:string} | null>(null);
   const latest = view?.messages.at(-1);
@@ -58,7 +57,7 @@ export function IssueDiscussion({api, number, ready, created}: {
     const next = await api<Conversation>(route+"/discussion",{body:{...cmd,repositoryId:current.repositoryId,
       issueId:current.issueId,policyHash:current.policyHash},timeoutMs:90000});
     retry.current = null;
-    setView(next); setText(""); setRecorded(false);
+    setView(next); setText("");
   }
 
   async function act(action: "open"|"send"|"reload"|"begin"|"record") {
@@ -80,7 +79,7 @@ export function IssueDiscussion({api, number, ready, created}: {
       } else if (action === "record" && view?.proposal) {
         await api(route+"/scope",{body:{repositoryId:view.repositoryId,issueId:view.issueId,issueHash:view.issueHash,
           baseSha:view.baseSha,policyHash:view.policyHash,previous:view.savedScopeId,ownerMessage:latest?.id,...view.proposal}});
-        setRecorded(true);
+        setView(await api<Conversation>(route+"/discussion?poll=true"));
       }
     } catch(e) { setError((e as Error).message); }
     finally { setBusy(false); }
@@ -101,9 +100,9 @@ export function IssueDiscussion({api, number, ready, created}: {
         <h4>Files to change</h4><ul>{view.proposal.paths.map(p=><li key={p}><code>{p}</code></li>)}</ul>
         <h4>How to verify the change</h4><ul>{view.proposal.checks.map(c=><li key={c}>{c}</li>)}</ul>
         {view.canBegin ? <button disabled={!ready || busy || pending || view.stale} onClick={()=>act("begin")}>Begin coding</button>
-          : !pending && !view.stale && <><p>{recorded ? "Scope request saved. A project operator must configure the missing file permissions or checks before coding can begin." :
+          : !pending && !view.stale && <><p>{view.requestRecorded ? "Scope request saved. A project operator must configure the missing file permissions or checks before coding can begin." :
             "This plan needs file permissions or automated checks beyond those assigned to this issue. Ask the owner to revise the plan, or record the request for project setup."}</p>
-            {!recorded && <button className="secondary" disabled={!ready || busy} onClick={()=>act("record")}>Record scope request</button>}</>}
+            {!view.requestRecorded && <button className="secondary" disabled={!ready || busy} onClick={()=>act("record")}>Record scope request</button>}</>}
       </section>}
       <label>Message the lifecycle owner<textarea value={text} maxLength={4000} onChange={e=>setText(e.target.value)} /></label>
       <button disabled={!ready || busy || pending || !view.ownerAvailable || !text.trim()} onClick={()=>act("send")}>Send message</button>
