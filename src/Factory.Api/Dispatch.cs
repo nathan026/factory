@@ -22,6 +22,8 @@ public record WorkOrder(Assignment Assignment, WorkAction Action, SourcePacket S
         if (Action is WorkAction.Discuss or WorkAction.AnswerWorker)
         {
             if (Discussion is null || !Discussion.Valid(Assignment) || (Discussion.Recipient is null) != (Action == WorkAction.Discuss)
+                || Discussion.ScopePlanning is { } plan && (project.Ci?.Rules.RepositoryLayout is not { } layout ||
+                    !plan.Files.All(f => layout.Paths.Contains(f.Path)))
                 || ExpertRuntime is not null || Consultation is not null
                 || Context is not null || Answer is not null || Candidate is not null || Feedback is not null
                 || Source != new SourcePacket("", "", "") || Assignment.PolicyVersion != project.Policy.Version)

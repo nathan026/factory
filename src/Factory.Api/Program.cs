@@ -218,6 +218,8 @@ if (github is not null)
     if (operatorIntake is not null)
     {
         app.MapGet("/api/github/issues", (int? page) => github.ListIssues(page ?? 1));
+        app.MapGet("/api/github/issues/{number:int}/discussion", (int number, bool? poll) => github.IssueDiscussion(number,poll == true));
+        app.MapPost("/api/github/issues/{number:int}/discussion", (int number, ScopeMessage message) => github.PostIssueDiscussion(number,message));
         app.MapGet("/api/github/issues/{number:int}/scope", (int number) => github.ScopePreview(number));
         app.MapPost("/api/github/issues/{number:int}/scope", (int number, ScopeRequest request) => github.ApproveScope(number,request));
     }

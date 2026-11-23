@@ -27,6 +27,7 @@ const browser = await chromium.launch();
 try {
   const page = await browser.newPage();
   await page.addScriptTag({content:bundle.outputFiles[0].text});
+  await page.getByText("Manual scope review",{exact:true}).click();
   await page.getByRole("button",{name:"Review scope"}).click();
   assert.equal(await page.getByLabel("Work to complete").inputValue(), "Reduce scrolling");
   assert.equal(await page.getByLabel("What should work").inputValue(), "Show a spinner while a worker runs\nKeep the latest message visible");

@@ -6,13 +6,17 @@ public sealed class Lifecycle(IControlledProject project, CiProfile? ciProfile =
 {
     public DecisionOption[] Choices(WorkItem task) => task.Advice?.Consultation?.Options ?? project.Choices(task.Source);
 
-    public WorkItem Start(Guid id, string scenario, string? openingMessage = null, SourcePacket? source = null, WorkItem? prior = null, RoundApproval? followUp = null)
+    public WorkItem Start(Guid id, string scenario, string? openingMessage = null, SourcePacket? source = null, WorkItem? prior = null, RoundApproval? followUp = null, string? planningDiscussion = null)
     {
         if (!project.Policy.Valid()) throw new CommandConflict("Project verification policy is invalid.");
         if (!project.ExpertProfile.Valid()) throw new CommandConflict("Invalid expert profile.");
         var task = new WorkItem { Id = id, OwnerId = prior?.OwnerId ?? Guid.NewGuid(), FollowUp = followUp, OpenedAt = prior?.OpenedAt ?? DateTimeOffset.UtcNow, OpeningMessage = openingMessage, Scenario = scenario, Goal = followUp?.Scope ?? project.Goal, Source = source ?? project.Snapshot(),
             ContractVersion = ContractGate.Version, GateRule = GateEvaluation.Rule, Policy = project.Policy, ExpertRuntime = expertRuntime, OwnerRuntime = ownerRuntime, ExpertProfile = project.ExpertProfile };
         var brief = followUp is not null && project is HostedRepositoryProject hosted ? hosted.FollowUpBrief(task.Source, followUp.Scope) : project.Describe(task.Source);
+        if (planningDiscussion is not null)
+            brief = brief with { Requirements = brief.Requirements with {
+                Constraints = [..brief.Requirements.Constraints, "Scope conversation for context. The approved objective, files and verification checks govern execution. " + planningDiscussion]
+            }};
         task.Memory = OwnerMemory.Initialize(task, brief, legacy: false);
         if (prior is not null)
         {

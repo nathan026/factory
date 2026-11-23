@@ -67,6 +67,41 @@ internal static class OwnerDiscussionChecks
         Console.WriteLine("Passed: synthetic owner turn, restart before apply, exact worker continuation and unsupported reply block");
     }
 
+    private static void CheckScopeEvidence(Session journal)
+    {
+        var task = Guid.NewGuid();
+        var session = Guid.NewGuid().ToString();
+        var revision = new string('a',40);
+        var context = new ExpertSource(OwnerQuestion.Path, Wire.Digest("issue"), "issue");
+        var source = new ExpertSource("src/app.ts", Wire.Digest("code"), "code");
+        var question = new OwnerQuestion(task, Guid.NewGuid(), Guid.NewGuid(), "What is needed?", revision, 1,
+            Wire.Digest("checkpoint"), context, ScopePlanning:new(revision,[source]));
+        var run = new Assignment(Guid.NewGuid(),Phase.Planning,"Discuss scope",question.BriefHash,1,task,revision,"scope/v1",[]);
+        var order = new WorkOrder(run,WorkAction.Discuss,new("","",""),"scope",null,null,null,Discussion:question);
+        if (!question.Valid(run)) throw new Exception("A bounded planning packet failed admission.");
+        var proposal = new ScopeProposal("Keep conversations visible",[source.Path],["Show the latest message."]);
+        var result = JsonSerializer.SerializeToElement(new ScopeReply(GateInput.Hash(question),"Proposed a layout check.",proposal),Wire.Json);
+        object Read(ExpertSource doc) => new {tool="read_file",path=doc.Path,sha256=doc.Digest,view="base"};
+        var reads = JsonSerializer.Serialize(new[]{Read(context),Read(source)});
+        journal.Execute("""
+            INSERT INTO codex_attempts VALUES(@run,@task,'Discuss','sealed',@thread,@run,@result,@events,@source,@policy);
+            INSERT INTO leases VALUES(@run,@task,'Discuss','owner','released',@run,@digest,NULL,@policy);
+            """, ("run",session), ("task",task.ToString()), ("thread",Guid.NewGuid().ToString()),
+            ("result",result.GetRawText()), ("events",reads), ("source",revision), ("policy",GateInput.Hash(question)),
+            ("digest",Wire.Digest(result.GetRawText())));
+        CodexEvidence.Require(order,result,null,session);
+        foreach (var rejected in new[] { JsonSerializer.Serialize(new[]{Read(context)}),
+            JsonSerializer.Serialize(new[]{Read(source)}), JsonSerializer.Serialize(new[]{Read(context),Read(source with {Digest=Wire.Digest("different revision")})}) })
+        {
+            journal.Execute("UPDATE codex_attempts SET events=@events WHERE run=@run",("events",rejected),("run",session));
+            try { CodexEvidence.Require(order,result,null,session); throw new Exception("Planning passed without both pinned evidence reads."); }
+            catch (CommandConflict) { }
+        }
+        if ((proposal with {Paths=["../secrets"]}).Valid() || (proposal with {Checks=[]}).Valid())
+            throw new Exception("Unbounded or incomplete proposals passed validation.");
+        Console.WriteLine("Passed: controlled scope proposal binds the native owner, request and both pinned evidence reads");
+    }
+
     // This test constructs a synthetic receipt to exercise the controller side of the trust boundary.
     internal static void Run(IControlledProject project)
     {
@@ -163,6 +198,7 @@ internal static class OwnerDiscussionChecks
             restarted.ReconcileStalls();
             if (restarted.Discuss(task,timeout.Id,text).Status != "Expired" || restarted.Next(true).Id is not null)
                 throw new Exception("Expired discussion stayed eligible.");
+            CheckScopeEvidence(local);
             CheckWorkerResume(new Factory.Fixtures.SampleRuntime(ownerDiscussion:true), db, local);
             Console.WriteLine("Passed: controlled owner discussion scope, unsigned and unread evidence, restart, replay, stale owner and timeout");
         }

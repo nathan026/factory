@@ -1,0 +1,33 @@
+using System.Text;
+using System.Text.RegularExpressions;
+
+namespace Factory;
+
+public record ScopePlanning(string BaseSha, ExpertSource[] Files)
+{
+    internal static bool FilePath(string? path) =>
+        path is { Length: > 0 and <= 240 } && path.Split('/').All(p => Regex.IsMatch(p, @"\A[a-zA-Z0-9][a-zA-Z0-9_.-]{0,79}\z"));
+
+    internal bool Valid() =>
+        Regex.IsMatch(BaseSha ?? "", @"\A[0-9a-f]{40}\z") && Files is { Length: > 0 and <= 15 } &&
+        Files.All(f => f is not null && FilePath(f.Path) && f.Path != OwnerQuestion.Path &&
+            f.Content is not null && !f.Content.Contains('\0') && Encoding.UTF8.GetByteCount(f.Content) <= 16384 &&
+            Wire.Digest(f.Content) == f.Digest) &&
+        Files.DistinctBy(f => f.Path, StringComparer.OrdinalIgnoreCase).Count() == Files.Length &&
+        Files.Sum(f => Encoding.UTF8.GetByteCount(f.Content)) <= 128 * 1024;
+}
+
+public record ScopeProposal(string Goal, string[] Paths, string[] Checks)
+{
+    internal bool Valid() => !string.IsNullOrWhiteSpace(Goal) && Goal.Length <= 2000 &&
+        Paths is { Length: > 0 and <= 16 } && Paths.All(ScopePlanning.FilePath) &&
+        Paths.Distinct(StringComparer.OrdinalIgnoreCase).Count() == Paths.Length &&
+        Checks is { Length: > 0 and <= 16 } && Checks.All(c => !string.IsNullOrWhiteSpace(c) && c.Length <= 2000) &&
+        Checks.Distinct(StringComparer.Ordinal).Count() == Checks.Length;
+}
+
+public record ScopeReply(string RequestHash, string Reply, ScopeProposal? Proposal)
+{
+    internal bool Valid(OwnerQuestion question) => RequestHash == GateInput.Hash(question) &&
+        !string.IsNullOrWhiteSpace(Reply) && Reply.Length <= 4000 && (Proposal is null || Proposal.Valid());
+}

@@ -6,7 +6,9 @@ namespace Factory;
 public record ScenarioOption(string Id, string Label);
 public record DecisionOption(string Value, string Label);
 public record Discussion(Guid Id, int AfterEntry, string Text, string Reply, DateTimeOffset SentAt,
-    string? Status = null, string? Operation = null, string? EvidenceHash = null);
+    string? Status = null, string? Operation = null, string? EvidenceHash = null,
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    ScopeProposal? Proposal = null);
 public record TaskSummary(Guid Id, string Scenario, string Goal, Phase Phase, Activity Activity,
     DateTimeOffset? OpenedAt, string? WaitReason, string? LastActivity, int? DraftNumber = null, bool IssueFinished = false);
 public record QueueRow(TaskSummary Task, long Revision, long StateRevision);
@@ -41,7 +43,8 @@ public sealed partial class TaskStore
     public List<QueueRow> Queue() => database.Read(s =>
     {
         using var cmd = s.Command("""
-            SELECT q.summary,q.revision,t.turn FROM dashboard_queue q JOIN tasks t ON t.id=q.task_id ORDER BY t.turn DESC
+            SELECT q.summary,q.revision,t.turn FROM dashboard_queue q JOIN tasks t ON t.id=q.task_id
+            WHERE NOT EXISTS (SELECT 1 FROM github_scope_discussions d WHERE d.task_id=t.id) ORDER BY t.turn DESC
             """);
         using var rows = cmd.ExecuteReader();
         var queue = new List<QueueRow>();
@@ -95,6 +98,7 @@ public sealed partial class TaskStore
     public Discussion Discuss(Guid id, Guid messageId, string text) => database.Write(s =>
     {
         var key = id.ToString();
+        if (PlanningFor(s,id) is not null) throw new CommandConflict("Use the issue scope conversation before starting coding.");
         var previous = s.Text("SELECT exchange FROM task_discussion WHERE task_id=@id AND message_id=@message",
             ("id", key), ("message", messageId.ToString()));
         if (previous is not null)

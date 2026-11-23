@@ -131,12 +131,15 @@ def open_workspace(leases, order, git_commit, on_release=None, expert_session=No
         owner = order["action"] in ("Discuss","AnswerWorker")
         role = "owner" if owner else "expert"
         documents = [order["discussion"]["evidence"]] if owner else order["consultation"]["sources"]
+        if owner and order["discussion"].get("scopePlanning") is not None:
+            documents.extend(order["discussion"]["scopePlanning"]["files"])
+            git_commit = order["discussion"]["scopePlanning"]["baseSha"]
         files = {s["path"]:s["content"] for s in documents}
         a = order["assignment"]
         leases.reconcile()
         generation = leases.acquire(a["taskId"],expert_session,role,order["action"],request_hash,files)
         try:
-            yield Workspace(leases,generation,role,a["sourceHash"],None,files,False,next(iter(files)))
+            yield Workspace(leases,generation,role,a["sourceHash"],git_commit,files,False,next(iter(files)))
         finally:
             leases.release(generation)
         return

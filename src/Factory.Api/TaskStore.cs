@@ -11,7 +11,7 @@ public sealed partial class TaskStore(FactoryDatabase database, Lifecycle lifecy
     {
         using var db = database.Open();
         using var cmd = db.CreateCommand();
-        cmd.CommandText = "SELECT document FROM tasks ORDER BY " + (db is Microsoft.Data.Sqlite.SqliteConnection ? "rowid" : "turn") + " DESC";
+        cmd.CommandText = "SELECT document FROM tasks WHERE NOT EXISTS (SELECT 1 FROM github_scope_discussions d WHERE d.task_id=tasks.id) ORDER BY " + (db is Microsoft.Data.Sqlite.SqliteConnection ? "rowid" : "turn") + " DESC";
         using var rows = cmd.ExecuteReader();
         var result = new List<WorkItem>();
         while (rows.Read()) result.Add(Decode(rows.GetString(0)));
@@ -221,7 +221,7 @@ public sealed partial class TaskStore(FactoryDatabase database, Lifecycle lifecy
         if (order.Action == WorkAction.Discuss && order.Discussion is { } question)
         {
             if (!OpenDiscussion(s, id)) return null;
-            if (!liveOwner || !CurrentDiscussion(task, question))
+            if (!liveOwner || !CurrentDiscussion(s, task, question))
             {
                 FinishDiscussion(s, id, "Unavailable", "The owner runtime or the pinned evidence changed before execution.");
                 return null;

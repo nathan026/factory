@@ -1,9 +1,12 @@
 """Desk approval through GitHubSync and durable state against an isolated loopback Git repository."""
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import closing
 import hashlib
 import json
 import os
 from pathlib import Path
+import sqlite3
+import uuid
 import shutil
 import subprocess
 import tempfile
@@ -59,11 +62,91 @@ class IssuePickerTest(unittest.TestCase):
         raw = subprocess.check_output(["dotnet", self.dll, "--issue-picker", self.git.url, self.directory],
                                      input=json.dumps(dict(command=command, number=number, body=body, enable=enable, bindings=self.bindings)),
                                      text=True, timeout=18,
-                                     env={**os.environ, "FACTORY_FOLLOWUP_APPROVALS":str(self.approvals)})
+                                     env={**os.environ, "FACTORY_FOLLOWUP_APPROVALS":str(self.approvals),
+                                          "FACTORY_LEASE_DB":str(self.directory/"synthetic-owner.sqlite")})
         return json.loads(raw)
 
     def conflict(self, *args, **kwargs):
         self.assertIn("conflict", self.invoke(*args, **kwargs))
+
+    def seal_owner(self,claim,result):
+        q = claim["question"]
+        doc = q["scopePlanning"]["files"][0]
+        events = [dict(tool="read_file",path=x["path"],sha256=x["digest"],view="base") for x in [q["evidence"],doc]]
+        raw = json.dumps(result,separators=(",",":"))
+        with closing(sqlite3.connect(self.directory/"synthetic-owner.sqlite")) as journal, journal:
+            journal.execute("create table if not exists codex_attempts(run,task,action,status,thread,generation,result,events,source,policy)")
+            journal.execute("create table if not exists leases(run,task,operation,role,state,generation,outcome_hash,candidate_hash,policy)")
+            journal.execute("insert into codex_attempts values(?,?,'Discuss','sealed',?,?,?,?,?,?)",
+                            (claim["session"],q["taskId"],str(uuid.uuid4()),claim["session"],raw,json.dumps(events),
+                             q["scopePlanning"]["baseSha"],claim["requestHash"]))
+            journal.execute("insert into leases values(?,?,'Discuss','owner','released',?,?,NULL,?)",
+                            (claim["session"],q["taskId"],claim["session"],hashlib.sha256(raw.encode()).hexdigest(),claim["requestHash"]))
+
+    def test_discuss_before_start_preserves_owner_and_operator_answers(self):
+        view = self.invoke("discussion")
+        self.assertIsNone(view["taskId"])
+        self.assertTrue(view["ownerAvailable"])
+        selection = {k:view[k] for k in ("repositoryId","issueId","issueHash","baseSha","policyHash")}
+        message = dict(**selection, id=str(uuid.uuid4()), previous=None, text="Keep the shipping rule inclusive.")
+        pending = self.invoke("message",body=message)
+        self.assertEqual(pending,self.invoke("message",body=message))
+        self.assertFalse(pending["canBegin"])
+        self.assertEqual(pending,self.invoke("transcript"))
+        self.assertEqual(self.invoke("tasks"), [])
+        self.assertEqual(self.invoke("queue"), [])
+        self.conflict("message",body={**message,"id":str(uuid.uuid4()),"previous":message["id"]})
+        claim = self.invoke("ownerClaim")
+        self.assertEqual(claim["workerMode"],"codex-subscription")
+        selected = self.invoke("preview")
+        proposal = dict(goal="Respect the approved shipping boundary.",paths=selected["paths"],checks=selected["checks"])
+        result = dict(requestHash=claim["requestHash"],reply="I will test the exact threshold.",proposal=proposal)
+        send = dict(id=claim["id"],token=claim["token"],result=result)
+        self.conflict("receive",body=send)
+        self.seal_owner(claim,result)
+        self.assertTrue(self.invoke("receive",body=send))
+        approved = self.invoke("discussion")
+        self.assertTrue(approved["canBegin"])
+        self.assertEqual(approved["proposal"],proposal)
+        start = dict(repositoryId=view["repositoryId"],issueId=view["issueId"],scopeHash=view["issueHash"],scopeApproval=approved["scopeApproval"])
+        self.git.issues[5]["title"] += " changed"
+        self.assertTrue(self.invoke("discussion")["stale"])
+        self.conflict("start",body=start)
+        self.git.issues[5]["title"] = self.git.issues[5]["title"].removesuffix(" changed")
+        task_id = self.invoke("start",body=start)
+        self.assertEqual(task_id,pending["taskId"])
+        task, = self.invoke("tasks")
+        self.assertEqual(task["ownerId"],pending["ownerId"])
+        self.assertEqual(task["goal"],proposal["goal"])
+        self.assertIn(message["text"],str(task["memory"]["briefs"][-1]["requirements"]["constraints"]))
+        self.assertEqual(self.invoke("start",body=start),task_id)
+        plan = self.invoke("planningClaim")
+        self.assertEqual(plan["context"]["ownerId"],pending["ownerId"])
+        self.assertIn(message["text"],str(plan["context"]["brief"]["requirements"]["constraints"]))
+        self.assertEqual(self.git.writes,[])
+
+    def test_request_broader_scope_is_bound_to_owner_turn(self):
+        view = self.invoke("discussion",7)
+        pins = {k:view[k] for k in ("repositoryId","issueId","issueHash","baseSha","policyHash")}
+        msg = dict(**pins,id=str(uuid.uuid4()),previous=None,text="Discuss layout behavior.")
+        self.invoke("message",7,msg)
+        claim = self.invoke("ownerClaim",7)
+        proposal = dict(goal="Improve layout.",paths=["src/app.tsx"],checks=["Show a progress spinner."])
+        result = dict(requestHash=claim["requestHash"],reply="This needs a broader scope.",proposal=proposal)
+        self.seal_owner(claim,result)
+        self.assertTrue(self.invoke("receive",7,dict(id=claim["id"],token=claim["token"],result=result)))
+        view = self.invoke("discussion",7)
+        self.assertEqual(view["proposal"],proposal)
+        self.assertFalse(view["canBegin"])
+        request = dict(**pins,**proposal,previous=view["savedScopeId"],ownerMessage=msg["id"])
+        self.conflict("approve",7,{**request,"goal":"Change the proposal."})
+        saved = self.invoke("approve",7,request)
+        self.assertFalse(saved["approvedForExecution"])
+        self.assertEqual(saved["id"],self.invoke("discussion",7)["savedScopeId"])
+        self.conflict("start",7,dict(repositoryId=view["repositoryId"],issueId=view["issueId"],scopeHash=view["issueHash"],scopeApproval=saved["id"]))
+        self.invoke("message",7,{**msg,"id":str(uuid.uuid4()),"previous":msg["id"],"text":"Use a simpler change."})
+        self.conflict("approve",7,request)
+        self.assertEqual(self.invoke("queue"),[])
 
     def test_other_issue_cannot_inherit_or_start_with_copied_policy(self):
         assigned = self.invoke("preview", 5)

@@ -251,6 +251,15 @@ public sealed partial class GitHubRepository : IDisposable
         }
     }
 
+    internal async Task<ExpertSource[]> ScopeSources(string revision, IControlledProject project)
+    {
+        if (project is not HostedRepositoryProject || project.Ci?.Rules.RepositoryLayout is null)
+            throw new CommandConflict("This repository has no approved source files for an owner discussion.");
+        var snapshot = await Snapshot(revision, project, project.Ci, followUp: true);
+        return project.Describe(snapshot.Source).Documents.Select(document => new ExpertSource(
+            document.Path, document.Digest, snapshot.Source.Content(document.Part, document.Path))).ToArray();
+    }
+
     public async Task<(string Tree, SourcePacket Source, string Path)> Snapshot(string revision, IControlledProject project, CiProfile? ci = null, bool followUp = false)
     {
         var commit = (await Call("git/commits/" + revision))!;

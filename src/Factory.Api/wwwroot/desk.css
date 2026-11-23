@@ -604,3 +604,9 @@ textarea {
     scroll-behavior: auto;
   }
 }
+
+.scope-transcript {
+  max-height: 40vh;
+  overflow-y: auto;
+  overflow-wrap: anywhere;
+}

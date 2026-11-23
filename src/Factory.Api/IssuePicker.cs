@@ -5,7 +5,9 @@ using System.Text.RegularExpressions;
 namespace Factory;
 
 public record ScopeRequest(long RepositoryId, long IssueId, string IssueHash, string BaseSha, string PolicyHash,
-    Guid? Previous, string Goal, string[] Paths, string[] Checks);
+    Guid? Previous, string Goal, string[] Paths, string[] Checks,
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    Guid? OwnerMessage = null);
 public record SavedIssueScope(Guid Id, int Number, ScopeRequest Request, bool ApprovedForExecution = false)
 {
     public string Goal => Request.Goal;
@@ -43,7 +45,28 @@ public sealed partial class TaskStore
         return numbers.ToArray();
     });
 
-    internal SavedIssueScope SaveScope(int number, ScopeRequest request, bool approvedForExecution) => database.Write(s=>{
+    internal SavedIssueScope SaveScope(int number, ScopeRequest request, bool approvedForExecution) =>
+        database.Write(s => {
+            var planning = PlanningFor(s,request.RepositoryId,number);
+            var latest = planning is null ? null : ScopeTranscript(s,planning.TaskId).LastOrDefault();
+            if (latest?.Status == "Pending") throw new CommandConflict("Wait for the current owner reply before approving a scope.");
+            if (request.OwnerMessage is { } ownerMessage)
+            {
+                if (planning is null || latest?.Id != ownerMessage || latest.Status != "Answered" || latest.Proposal is not { } proposal ||
+                    planning.Pins.IssueId != request.IssueId || planning.Pins.IssueHash != request.IssueHash ||
+                    planning.Pins.PolicyHash != request.PolicyHash || planning.Pins.BaseSha != request.BaseSha ||
+                    proposal.Goal != request.Goal || !proposal.Paths.SequenceEqual(request.Paths) || !proposal.Checks.SequenceEqual(request.Checks))
+                    throw new CommandConflict("The owner proposal changed. Reopen the issue before recording the request.");
+                approvedForExecution = false;
+            }
+            var saved = SaveScope(s,number,request,approvedForExecution);
+            if (planning is not null)
+                PersistPlanning(s,planning with { ExecutionApproval = approvedForExecution ? saved.Id : null });
+            return saved;
+        });
+
+    private static SavedIssueScope SaveScope(Session s, int number, ScopeRequest request, bool approvedForExecution)
+    {
         var prior=GetScope(s,request.RepositoryId,number);
         if (prior is not null && Encode(prior.Request)==Encode(request) && prior.ApprovedForExecution==approvedForExecution) return prior;
         if (prior?.Id!=request.Previous || IssueStatus(s,request.RepositoryId,number).TaskId is not null)
@@ -54,7 +77,7 @@ public sealed partial class TaskStore
             ON CONFLICT(repo_id,issue_number) DO UPDATE SET document=excluded.document
             """,("r",request.RepositoryId),("n",number),("d",Encode(saved)));
         return saved;
-    });
+    }
 }
 
 public sealed partial class GitHubSync
@@ -118,7 +141,7 @@ public sealed partial class GitHubSync
         var saved=store.ScopeFor(config.RepositoryId,number);
         var assigned=PolicyAssigned(number,(long)issue["id"]!,hash);
         var current=assigned && saved is { ApprovedForExecution: true } && saved.Request.IssueId==(long)issue["id"]! && saved.Request.IssueHash==hash &&
-            saved.BaseSha==revision && MatchesInstalled(saved.Request);
+            saved.BaseSha==revision && MatchesInstalled(saved.Request) && store.PlanningAllowsStart(config.RepositoryId,number,saved.Id);
         return new {repositoryId=config.RepositoryId,issueId=(long)issue["id"]!,issueHash=hash,baseSha=revision,policyHash=ci!.Hash,
             title=(string?)issue["title"],body=(string?)issue["body"],assigned,
             paths=assigned ? InstalledPaths : [],checks=assigned ? InstalledChecks : [],saved,canBegin=current};
@@ -150,7 +173,7 @@ public sealed partial class GitHubSync
         var (issue,hash,revision)=await ScopeInputs(number);
         if (hash!=scope.Request.IssueHash || revision!=scope.BaseSha || (long)issue["id"]! != scope.Request.IssueId)
             throw new CommandConflict("The approved issue or base changed. Review and approve the scope again.");
-        if (!scope.ApprovedForExecution || !PolicyAssigned(number,selection.IssueId,hash) || !MatchesInstalled(scope.Request))
+        if (!scope.ApprovedForExecution || !store.PlanningAllowsStart(config.RepositoryId,number,scope.Id) || !PolicyAssigned(number,selection.IssueId,hash) || !MatchesInstalled(scope.Request))
             throw new CommandConflict("This issue needs matching files and automated checks assigned before it can begin.");
         var snapshot=await repo.Snapshot(revision,project,ci,followUp:true);
         var admission=new ApprovedIssue(number,selection.IssueId,hash,ci!.Rules.HostedGitHub!.Issue.Scenario);

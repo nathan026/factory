@@ -49,7 +49,13 @@ public sealed partial class TaskStore
         var taskId = prior.TaskId;
         if (taskId is null && origin is not null && source is not null && observation.Reason == "Eligible")
         {
-            var taskIdForRound = Guid.NewGuid();
+            var planning = PlanningFor(s,repo,number);
+            if (planning is not null && (scope is null || planning.ExecutionApproval != scope.Id ||
+                planning.Pins.IssueId != origin.IssueId || planning.Pins.IssueHash != origin.ScopeHash ||
+                planning.Pins.BaseSha != origin.BaseSha || planning.Pins.PolicyHash != origin.PolicyHash))
+                throw new CommandConflict("Review the current owner proposal and approve its complete scope before starting.");
+            var priorTask = planning is null ? null : ReadTask(s,planning.TaskId);
+            var taskIdForRound = priorTask?.Id ?? Guid.NewGuid();
             RoundApproval? grant = null;
             if (scope is not null)
             {
@@ -60,7 +66,11 @@ public sealed partial class TaskStore
                 grant = new RoundApproval(scope.Id,taskIdForRound,scope.Goal,origin.BaseSha,source.Fingerprint(),scope.PolicyHash);
                 grant.Persist();
             }
-            var task = lifecycle.Start(taskIdForRound, origin.Scenario, observation.Title + "\n\n" + observation.Body, source, followUp: grant);
+            var task = lifecycle.Start(taskIdForRound, origin.Scenario, observation.Title + "\n\n" + observation.Body, source, prior: priorTask, followUp: grant,
+                planningDiscussion: planning is null ? null : Encode(ScopeTranscript(s,planning.TaskId)
+                    .Select(m => new { operatorMessage=m.Text, ownerReply=m.Reply, m.Status })));
+            if (planning is not null)
+                s.Execute("DELETE FROM github_scope_discussions WHERE task_id=@id", ("id",taskIdForRound.ToString()));
             if (operatorStart) task.Record("Operator", $"Requested start of {origin.Repository}#{number}.");
             task.Record("Controller", $"Admitted {origin.Repository}#{number} at {origin.BaseSha}.");
             Save(s, task);

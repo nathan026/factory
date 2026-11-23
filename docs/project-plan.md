@@ -10,6 +10,8 @@ The task desk shows the request, completed changes, verification results and the
 
 Use ASD-STE100 descriptive writing guidance for factory-authored text. Use one term for each concept. Write one topic per paragraph. Give each sentence one subject and use at most 25 words in a descriptive sentence. Use direct instructions for the operator's next action. Preserve source quotations and identifiers as evidence. [ASD-STE100, Issue 9, sections 5 and 6](https://www.asd-ste100.org/assets/files/ASD-STE100_ISSUE9.pdf)
 
+For an open GitHub issue with no assigned scope, the operator can discuss the issue with its lifecycle owner before admitting any coding work (FR02, FR03, FR10). The owner inspects the project's permitted files at the pinned revision, collects missing requirements and proposes files and checks. The controller can accept a proposal within the issue's existing authorization. Broader permissions or new executable checks require project setup. Keep the conversation and owner when the operator starts coding.
+
 A desk operator may authorize a follow-up on a delivered GitHub task. Record the revised objective and exact base under the installed project permissions. Keep the same lifecycle owner, prior briefs, delivery evidence and PR links. Require fresh verification and independent review for the next delivery. After the operator accepts the merged work, publish the work and check summary, close the issue and reconcile safe branch cleanup. Repository issue writes require explicit opt-in.
 
 ## Functional requirements

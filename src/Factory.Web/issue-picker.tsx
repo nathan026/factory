@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { IssueDiscussion } from "./issue-discussion";
 import { Api, GitHubIntake } from "./types";
 
 type Item = { number: number; id: number; title: string; taskId: string | null; configured: boolean; canReview: boolean; reason: string | null };
@@ -43,7 +44,10 @@ export function GitHubIssueForm({api,ready,created,cancel,intake,goal}: Props) {
     {item && (item.taskId ? <button disabled={!ready} onClick={()=>created(item.taskId!)}>Open existing task</button> :
       item.configured ? <><p>{item.reason==="Eligible" ? goal : item.reason}</p>
         <button disabled={!ready || busy || item.reason!=="Eligible"} onClick={begin}>Begin</button></> :
-      item.canReview ? <IssueScope key={item.id} api={api} ready={ready} item={item} created={created}/> :
+      item.canReview ? <React.Fragment key={item.id}>
+        <IssueDiscussion api={api} ready={ready} number={number} created={created}/>
+        <details><summary>Manual scope review</summary><IssueScope api={api} ready={ready} item={item} created={created}/></details>
+      </React.Fragment> :
       <p>This issue has no approved scope. Desk scope approval is disabled for this repository.</p>)}
     {error && <p role="alert">{error}</p>}
     <div className="actions">

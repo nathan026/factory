@@ -107,6 +107,24 @@ internal static class CodexEvidence
             if (order.Discussion is { } question)
             {
                 var reads = events.RootElement;
+                if (question.ScopePlanning is { } planning)
+                {
+                    if (output.Deserialize<ScopeReply>(Wire.ResultJson)?.Valid(question) != true || reads.ValueKind != JsonValueKind.Array)
+                        throw reject;
+                    var documents = planning.Files.Prepend(question.Evidence).ToDictionary(d => d.Path, d => d.Digest);
+                    var seen = new HashSet<string>();
+                    foreach (var item in reads.EnumerateArray())
+                    {
+                        var path = item.GetProperty("path").GetString();
+                        if (path is null || !documents.TryGetValue(path, out var expected) ||
+                            item.GetProperty("tool").GetString() != "read_file" || item.GetProperty("sha256").GetString() != expected ||
+                            item.GetProperty("view").GetString() is not ("base" or "current"))
+                            throw reject;
+                        seen.Add(path);
+                    }
+                    if (!seen.Contains(question.Evidence.Path) || !planning.Files.Any(f => seen.Contains(f.Path))) throw reject;
+                    return;
+                }
                 if (output.GetProperty("requestHash").GetString() != GateInput.Hash(question) ||
                     !output.GetProperty("fact").TryGetInt32(out var fact) || fact < -1 ||
                     fact >= JsonSerializer.Deserialize<string[]>(question.Evidence.Content)!.Length ||

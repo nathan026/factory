@@ -112,3 +112,8 @@ CREATE TABLE IF NOT EXISTS github_branch_cleanup (
     action_id TEXT NOT NULL REFERENCES github_issue_actions(id), branch TEXT NOT NULL, result TEXT,
     PRIMARY KEY(action_id,branch)
 );
+
+CREATE TABLE IF NOT EXISTS github_scope_discussions (
+    repo_id BIGINT NOT NULL, issue_number INTEGER NOT NULL, task_id TEXT NOT NULL UNIQUE REFERENCES tasks(id),
+    document TEXT NOT NULL, PRIMARY KEY(repo_id,issue_number)
+);
