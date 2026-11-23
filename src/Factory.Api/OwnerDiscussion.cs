@@ -173,8 +173,14 @@ public sealed partial class TaskStore
         else if (question.ScopePlanning is not null)
         {
             var result = output.Deserialize<ScopeReply>(Wire.ResultJson)!;
-            if (result.Proposal is { } proposal) SaveOwnerProposal(s, question, proposal);
-            FinishDiscussion(s,order.Id,"Answered",result.Reply,GateInput.Hash(question),result.Proposal);
+            var proposal = result.Proposal;
+            if (proposal is not null && !proposal.Valid())
+                FinishDiscussion(s, order.Id, "NeedsScope", result.DiscussionText(), GateInput.Hash(question));
+            else
+            {
+                if (proposal is not null) SaveOwnerProposal(s, question, proposal);
+                FinishDiscussion(s, order.Id, "Answered", result.Reply, GateInput.Hash(question), proposal);
+            }
         }
         else
         {

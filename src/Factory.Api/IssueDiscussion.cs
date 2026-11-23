@@ -78,8 +78,39 @@ public sealed partial class TaskStore
         return entries;
     }
 
-    internal object ScopeDiscussionView(long repo,int number,ScopePins? fresh) => database.Read(s =>
-        ScopeDiscussionView(s,repo,number,fresh));
+    internal object ScopeDiscussionView(long repo,int number,ScopePins? fresh)
+    {
+        if (fresh is null) return database.Read(s => ScopeDiscussionView(s,repo,number,null));
+        return database.Write(s => {
+            if (PlanningFor(s,repo,number) is { } planning) RecoverExpiredReply(s,planning);
+            return ScopeDiscussionView(s,repo,number,fresh);
+        });
+    }
+
+    private static void RecoverExpiredReply(Session s, ScopeConversation planning)
+    {
+        using var cmd = s.Command("""
+            SELECT d.exchange,o.request,e.session_id,j.deadline,i.deadline
+            FROM task_discussion d JOIN discussion_jobs j ON j.task_id=d.task_id AND j.message_id=d.message_id
+            JOIN dispatch_outbox o ON o.id=j.operation AND o.task_id=j.task_id
+            JOIN dispatch_sessions e ON e.operation_id=o.id JOIN dispatch_inbox i ON i.id=o.id
+            WHERE d.task_id=@task AND d.message_id=@message AND j.pending=0 AND i.applied=0 AND i.output IS NULL
+            """, ("task",planning.TaskId.ToString()),("message",planning.LastMessage.ToString()));
+        using var row = cmd.ExecuteReader();
+        if (!row.Read()) return;
+        var exchange = JsonSerializer.Deserialize<Discussion>(row.GetString(0),Wire.Json)!;
+        if (exchange.Status != "Expired") return;
+        var order = JsonSerializer.Deserialize<WorkOrder>(row.GetString(1),Wire.Json)!;
+        if (order.Id != exchange.Operation || order.Assignment.TaskId != planning.TaskId ||
+            order.Discussion is not { } q || q.OwnerId != planning.OwnerId || q.TaskId != planning.TaskId ||
+            q.MessageId != exchange.Id || q.BriefHash != planning.Checkpoint || q.ScopePlanning?.BaseSha != planning.Pins.BaseSha) return;
+        var reply = CodexEvidence.HistoricalScopeReply(order,row.GetString(2),Math.Min(row.GetInt64(3),row.GetInt64(4)));
+        if (reply is null) return;
+        row.Close();
+        var history = exchange with { Status="RecoveredReply", Reply=reply.DiscussionText(), EvidenceHash=GateInput.Hash(q), Proposal=null };
+        s.Execute("UPDATE task_discussion SET exchange=@doc WHERE task_id=@task AND message_id=@message",
+            ("doc",Encode(history)),("task",planning.TaskId.ToString()),("message",exchange.Id.ToString()));
+    }
 
     private object ScopeDiscussionView(Session s,long repo,int number,ScopePins? fresh)
     {

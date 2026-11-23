@@ -121,7 +121,9 @@ def turn_packet(workspace, order, bindings):
                 "When requirements are clear, propose a short goal, specific files to edit and concrete acceptance checks. "
                 "Use already authorized paths and exact configured checks when they genuinely cover the issue; never substitute "
                 "an unrelated policy. You may propose additional paths or checks but identify the permission or verifier needed. "
-                "Submitting a proposal does not grant access or execute work. At most 16 paths and 16 checks; no shell commands.")
+                "List only exact repository-relative filenames in paths. If more inspection is needed to identify them, "
+                "explain the needed read access in reply and return proposal null. Submitting a proposal does not grant access "
+                "or execute work. At most 16 paths and 16 checks; no shell commands.")
         schema = {"type":"object","additionalProperties":False,"required":["fact"],"properties":{"fact":{"type":"integer"}}}
         prompt = {"question":order["discussion"]["text"],"documents":workspace.paths}
         return schema, prompt, ("Answer from the task's accepted record. Read the JSON array in the listed document. "

@@ -66,6 +66,31 @@ internal static class CodexEvidence
         }
     }
 
+    // An expired planning exchange may display an on-time sealed reply as history.
+    // It cannot submit a result, reopen the operation or authorize its proposal.
+    public static ScopeReply? HistoricalScopeReply(WorkOrder order, string session, long deadline)
+    {
+        if (order.Action != WorkAction.Discuss || order.Discussion?.ScopePlanning is null) return null;
+        try
+        {
+            using var db = Journal();
+            db.Open();
+            using var cmd = db.CreateCommand();
+            cmd.CommandText = "SELECT result FROM codex_attempts WHERE task=$task AND run=$run AND action='Discuss' AND status='sealed' AND ended<= $deadline";
+            cmd.Parameters.AddWithValue("$task",order.Assignment.TaskId.ToString());
+            cmd.Parameters.AddWithValue("$run",session);
+            cmd.Parameters.AddWithValue("$deadline",deadline);
+            if (cmd.ExecuteScalar() is not string raw) return null;
+            using var result = JsonDocument.Parse(raw);
+            Require(order,result.RootElement,null,session);
+            return result.RootElement.Deserialize<ScopeReply>(Wire.ResultJson);
+        }
+        catch (Exception e) when (e is SqliteException or JsonException or CommandConflict)
+        {
+            return null;
+        }
+    }
+
     // The native supervisor owns this journal. The model and its containers have no journal or controller access.
     public static void Require(WorkOrder order, JsonElement output, RepositoryLayout? layout, string? executionSession = null)
     {

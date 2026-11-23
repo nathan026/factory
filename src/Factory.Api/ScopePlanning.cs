@@ -29,5 +29,15 @@ public record ScopeProposal(string Goal, string[] Paths, string[] Checks)
 public record ScopeReply(string RequestHash, string Reply, ScopeProposal? Proposal)
 {
     internal bool Valid(OwnerQuestion question) => RequestHash == GateInput.Hash(question) &&
-        !string.IsNullOrWhiteSpace(Reply) && Reply.Length <= 4000 && (Proposal is null || Proposal.Valid());
+        !string.IsNullOrWhiteSpace(Reply) && Reply.Length <= 4000;
+
+    // Keep useful discussion text when a suggested scope cannot be admitted.
+    public string DiscussionText()
+    {
+        if (Proposal is null) return Reply;
+        var checks = Proposal.Checks is { Length: > 0 and <= 16 } items &&
+            items.All(c => !string.IsNullOrWhiteSpace(c) && c.Length <= 2000)
+            ? "\n\nSuggested checks\n" + string.Join("\n", items.Select(c => "• " + c)) : "";
+        return Reply + checks;
+    }
 }

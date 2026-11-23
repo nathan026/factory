@@ -10,6 +10,7 @@ import uuid
 import shutil
 import subprocess
 import tempfile
+import time
 import unittest
 
 from github_fixture import GitHubFixture
@@ -75,11 +76,11 @@ class IssuePickerTest(unittest.TestCase):
         events = [dict(tool="read_file",path=x["path"],sha256=x["digest"],view="base") for x in [q["evidence"],doc]]
         raw = json.dumps(result,separators=(",",":"))
         with closing(sqlite3.connect(self.directory/"synthetic-owner.sqlite")) as journal, journal:
-            journal.execute("create table if not exists codex_attempts(run,task,action,status,thread,generation,result,events,source,policy)")
+            journal.execute("create table if not exists codex_attempts(run,task,action,status,thread,generation,result,events,source,policy,ended)")
             journal.execute("create table if not exists leases(run,task,operation,role,state,generation,outcome_hash,candidate_hash,policy)")
-            journal.execute("insert into codex_attempts values(?,?,'Discuss','sealed',?,?,?,?,?,?)",
+            journal.execute("insert into codex_attempts values(?,?,'Discuss','sealed',?,?,?,?,?,?,?)",
                             (claim["session"],q["taskId"],str(uuid.uuid4()),claim["session"],raw,json.dumps(events),
-                             q["scopePlanning"]["baseSha"],claim["requestHash"]))
+                             q["scopePlanning"]["baseSha"],claim["requestHash"],time.time()))
             journal.execute("insert into leases values(?,?,'Discuss','owner','released',?,?,NULL,?)",
                             (claim["session"],q["taskId"],claim["session"],hashlib.sha256(raw.encode()).hexdigest(),claim["requestHash"]))
 
@@ -123,6 +124,70 @@ class IssuePickerTest(unittest.TestCase):
         plan = self.invoke("planningClaim")
         self.assertEqual(plan["context"]["ownerId"],pending["ownerId"])
         self.assertIn(message["text"],str(plan["context"]["brief"]["requirements"]["constraints"]))
+        self.assertEqual(self.git.writes,[])
+
+    def test_narrative_in_path_preserves_verified_reply_only(self):
+        view = self.invoke("discussion")
+        pins = {k:view[k] for k in ("repositoryId","issueId","issueHash","baseSha","policyHash")}
+        msg = dict(**pins,id=str(uuid.uuid4()),previous=None,text="Discuss the frontend.")
+        self.invoke("message",body=msg)
+        claim = self.invoke("ownerClaim")
+        invalid = dict(goal="Improve layout",paths=["Inspect the frontend to identify its files."],
+                       checks=["Keep the composer visible."])
+        result = dict(requestHash=claim["requestHash"],reply="I need read access to identify the file.",proposal=invalid)
+        body = dict(id=claim["id"],token=claim["token"],result=result)
+        self.conflict("receive",body=body)
+        self.seal_owner(claim,result)
+        self.assertTrue(self.invoke("receive",body=body))
+        self.assertTrue(self.invoke("receive",body=body))
+        view = self.invoke("discussion")
+        self.assertIsNone(view["proposal"])
+        self.assertIsNone(view["scopeApproval"])
+        self.assertIsNone(self.invoke("preview")["saved"])
+        last, = view["messages"]
+        self.assertEqual(last["status"],"NeedsScope")
+        self.assertIn(result["reply"],last["reply"])
+        self.assertIn(invalid["checks"][0],last["reply"])
+        self.assertTrue(last["evidenceHash"])
+
+    def test_expired_discussion_recovers_only_timely_authenticated_text(self):
+        view = self.invoke("discussion")
+        pins = {k:view[k] for k in ("repositoryId","issueId","issueHash","baseSha","policyHash")}
+        msg = dict(**pins,id=str(uuid.uuid4()),previous=None,text="Plan a scope.")
+        pending = self.invoke("message",body=msg)
+        claim = self.invoke("ownerClaim")
+        assigned = self.invoke("preview")
+        result = dict(requestHash=claim["requestHash"],reply="Keep the shipping threshold inclusive.",
+                      proposal=dict(goal="Test the boundary",paths=assigned["paths"],checks=assigned["checks"]))
+        self.seal_owner(claim,result)
+        dbpath = self.directory / "slice.db"
+        with closing(sqlite3.connect(dbpath)) as db, db:
+            raw, = db.execute("select exchange from task_discussion").fetchone()
+            expired = dict(json.loads(raw),status="Expired",reply="Expired before delivery.")
+            db.execute("update task_discussion set exchange=?",(json.dumps(expired),))
+            db.execute("update discussion_jobs set pending=0")
+        journalpath = self.directory/"synthetic-owner.sqlite"
+        with closing(sqlite3.connect(journalpath)) as db, db:
+            end, events = db.execute("select ended,events from codex_attempts").fetchone()
+            db.execute("update codex_attempts set ended=?",(end+86400,))
+        self.assertEqual(self.invoke("discussion")["messages"][0]["status"],"Expired")
+        with closing(sqlite3.connect(journalpath)) as db, db:
+            db.execute("update codex_attempts set ended=?,events='[]'",(end,))
+        self.assertEqual(self.invoke("discussion")["messages"][0]["status"],"Expired")
+        with closing(sqlite3.connect(journalpath)) as db, db:
+            db.execute("update codex_attempts set events=?",(events,))
+        recovered = self.invoke("discussion")
+        self.assertEqual(recovered,self.invoke("transcript"))
+        last, = recovered["messages"]
+        self.assertEqual(last["status"],"RecoveredReply")
+        self.assertIn(result["reply"],last["reply"])
+        self.assertEqual(last["operation"],pending["messages"][0]["operation"])
+        self.assertTrue(last["evidenceHash"])
+        self.assertIsNone(recovered["scopeApproval"])
+        self.assertIsNone(recovered["proposal"])
+        self.assertFalse(recovered["canBegin"])
+        self.assertIsNone(self.invoke("preview")["saved"])
+        self.assertEqual(self.invoke("queue"),[])
         self.assertEqual(self.git.writes,[])
 
     def test_old_manual_approval_cannot_bypass_owner_clarification(self):

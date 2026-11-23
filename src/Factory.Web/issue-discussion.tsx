@@ -92,6 +92,8 @@ export function IssueDiscussion({api, number, ready, created}: {
       {view.messages.map((message,index)=><div key={message.id}>
         <p><strong>{index===0 && message.text.startsWith("Review this issue and the approved repository files.") ? "Opening request" : "You"}</strong><br/>{message.text}</p>
         <p style={{whiteSpace:"pre-wrap"}}><strong>Lifecycle owner</strong><br/>{message.reply}</p>
+        {message.status === "NeedsScope" && <p>The reply is saved. The proposed scope needs exact repository paths and valid checks before it can be approved.</p>}
+        {message.status === "RecoveredReply" && <p>The factory recovered this earlier reply from its verified receipt. The original request expired. Coding still needs an approved scope.</p>}
       </div>)}
       </div>
       {pending && <p role="status">Waiting for the lifecycle owner…</p>}
