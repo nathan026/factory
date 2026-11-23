@@ -353,6 +353,10 @@ export function EvidencePanel({ id, revision, api }: { id: string; revision: num
           <h3>Verification evidence</h3>
           <button disabled={downloading} onClick={download}>Download task evidence</button>
           {downloadError && <p role="alert">{downloadError}</p>}
+          {data.earlierVerification?.map(round => <details key={round.policy}>
+            <summary>Earlier verification · {round.policy}</summary><p>{round.goal}</p>
+            <ul>{round.attempts.map((a,i) => <li key={i}><code>{a.candidateHash.slice(0,12)}</code> · {a.failed.join(", ") || "Passed"}</li>)}</ul>
+          </details>)}
           {!data.receipts.length && <p>No verification receipt recorded yet.</p>}
           {data.receipts.map((r, i) => (
             <details key={i}>

@@ -252,6 +252,7 @@ public sealed partial class GitHubRepository : IDisposable
             var snapshot = project.Snapshot();
             if (followUp && project is not HostedRepositoryProject) throw new CommandConflict("Unsupported follow-up project layout.");
             var documents = project.Describe(snapshot).Documents;
+            var extra = JsonSerializer.Deserialize<Dictionary<string,string>>(snapshot.AdditionalFiles ?? "{}")!;
             foreach (var doc in documents)
             {
                 var directory = tree;
@@ -266,7 +267,8 @@ public sealed partial class GitHubRepository : IDisposable
                         if (item.Mode != "100644" || item.Type != "blob" || !followUp && item.Sha != Blob(snapshot.Content(doc.Part, doc.Path)))
                             throw new CommandConflict("Factory source bytes or mode differ from admission.");
                         var content = await ReadSourceBlob(item.Sha);
-                        if (followUp) snapshot = doc.Part switch
+                        if (followUp && extra.ContainsKey(doc.Path)) extra[doc.Path] = content;
+                        else if (followUp) snapshot = doc.Part switch
                         {
                             SourcePart.Source => snapshot with { Source = content },
                             SourcePart.Decisions => snapshot with { Decisions = content },
@@ -280,6 +282,7 @@ public sealed partial class GitHubRepository : IDisposable
                     else throw new CommandConflict("Factory source parent is not a directory.");
                 }
             }
+            if (followUp && extra.Count > 0) snapshot = snapshot with { AdditionalFiles = JsonSerializer.Serialize(extra) };
             return (tree, snapshot, project.Ci!.Rules.RepositoryLayout?.Source ?? documents.Single(d => d.Part == SourcePart.Source).Path);
         }
         var entries = await Tree(tree);

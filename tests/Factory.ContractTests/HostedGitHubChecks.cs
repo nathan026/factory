@@ -95,6 +95,7 @@ static class HostedGitHubChecks
         foreach (var path in layout.Paths) File.WriteAllText(Path.Combine(directory, path), path);
         var ci = CiProfile.Load(directory, version);
         var project = new HostedRepositoryProject(directory, ci);
+        BlockedRevisionChecks.Run(directory, project);
         var owner = new Lifecycle(project, ci);
         var task = owner.Start(Guid.NewGuid(), project.Scenarios.Single().Id);
         WorkOrder? order = null;

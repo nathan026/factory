@@ -5,7 +5,7 @@ namespace Factory;
 public record DispatchTicket(bool Advanced, string? Id = null, string? SchedulerId = null);
 public record DispatchClaim(string Token, WorkOrder Order, string WorkerMode);
 
-public sealed partial class TaskStore(FactoryDatabase database, Lifecycle lifecycle, Func<IControlledProject> newFixtureSession, int stallSeconds = 120, CiProfile? ciProfile = null, FundingProfile? funding = null, bool liveOwner = false)
+public sealed partial class TaskStore(FactoryDatabase database, Lifecycle lifecycle, Func<IControlledProject> newFixtureSession, int stallSeconds = 120, CiProfile? ciProfile = null, FundingProfile? funding = null, bool liveOwner = false, CiProfile? previousProfile = null)
 {
     public List<WorkItem> List()
     {

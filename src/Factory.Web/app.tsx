@@ -1,3 +1,4 @@
+import { ReviseRound } from "./revise-round";
 import React, { useCallback, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { IssueActions } from "./issue-actions";
@@ -406,6 +407,7 @@ function Desk({ api, signOut }: { api: Api; signOut: () => void }) {
                       <p>Awaiting GitHub confirmation of the original Draft PR request.</p>
                     )
                   )}
+                  {task.revisionAvailable && <ReviseRound key={task.id} task={task} ready={ready} api={api} update={update} />}
                   {!!task.previousDrafts?.length && <details><summary>Earlier deliveries</summary><ul>
                     {task.previousDrafts.map(pr=><li key={pr.number}><a href={pr.url}>PR #{pr.number}</a> · <code>{pr.headSha.slice(0,12)}</code></li>)}
                   </ul></details>}

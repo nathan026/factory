@@ -41,11 +41,15 @@ public record RepositoryLayout(string Source, string Decisions, string Cases, st
     }
 }
 
+public record RevisionPolicy(string PreviousVersion, string PreviousHash, Criterion[] Criteria);
+
 public record CiRules(ProjectPolicy Policy, string Goal, JsonElement Settings, string Environment, string Script,
     string ScriptHash, string[] RequiredRoles, string Publication, string Promotion, BlueprintPolicy? Blueprint = null,
     RepositoryLayout? RepositoryLayout = null,
     [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
-    HostedGitHubApproval? HostedGitHub = null);
+    HostedGitHubApproval? HostedGitHub = null,
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    RevisionPolicy? Revision = null);
 
 public record CiProfile(CiRules Rules, string Manifest, string Script)
 {
@@ -66,6 +70,12 @@ public record CiProfile(CiRules Rules, string Manifest, string Script)
             !rules.RequiredRoles.SequenceEqual(["Planner", "Implementer", "Verifier", "Reviewer"]) ||
             rules.Publication != "reviewed-draft" || rules.Promotion != "human")
             throw new InvalidDataException("Unsupported project policy, role, environment or publication rule.");
+        if (rules.Revision is { } upgrade && (rules.HostedGitHub is null || upgrade.PreviousVersion == version ||
+            !System.Text.RegularExpressions.Regex.IsMatch(upgrade.PreviousVersion, @"\A[a-z][a-z0-9-]*/v[1-9][0-9]*\z") ||
+            !System.Text.RegularExpressions.Regex.IsMatch(upgrade.PreviousHash, @"\A[a-f0-9]{64}\z") ||
+            upgrade.Criteria is null || !upgrade.Criteria.Select(c => c.Id).SequenceEqual(rules.Policy.RequiredChecks) ||
+            upgrade.Criteria.Any(c => string.IsNullOrWhiteSpace(c.Text))))
+            throw new InvalidDataException("Invalid installed revision policy.");
         var script = Read(rules.Script);
         if (Wire.Digest(script) != rules.ScriptHash) throw new InvalidDataException("CI script differs from the trusted project policy.");
         return new(rules, manifest, script);

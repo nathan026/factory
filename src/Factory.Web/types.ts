@@ -22,6 +22,7 @@ export type Catalog = { issueActions?: boolean; restorePaused: boolean; goal: st
 export type Exchange = { id: string; afterEntry: number; text: string; reply: string; sentAt: string };
 export type IssueAction = { id: string; kind: "follow-up" | "finish"; stage: string; scope: string; baseSha: string; headSha: string; commentId: string | null };
 export type Workspace = Task & {
+  revisionAvailable?: boolean;
   previousDrafts?: {number: number; url: string; headSha: string}[];
   issueAction?: IssueAction | null;
   summary: { issue: string; request: string | null; work: string[]; checks: string[] };
@@ -87,6 +88,7 @@ export type Workspace = Task & {
 export type Evidence = {
   ciPolicy?: { policy: { version: string; maxRepairs: number }; environment: string } | null;
   ciBudget?: { admitted: number; limit: number; secondsPerRound: number } | null;
+  earlierVerification?: { policy: string; goal: string; attempts: { candidateHash: string; failed: string[] }[] }[];
   ciExecutions?: {
     binding: { executionId: string; revisionKind: string; revision: string; candidateHash: string };
     checks: { id: string; exitCode: number }[];

@@ -112,8 +112,10 @@ var ownerRuntime = Environment.GetEnvironmentVariable("FACTORY_OWNER_RUNTIME");
 if (ownerRuntime is not null && (ownerRuntime != "codex-subscription" || !hatchet ||
     string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("FACTORY_LEASE_DB"))))
     throw new InvalidOperationException("Subscription owner discussion requires Hatchet and a shared lease journal.");
+var previousProfile = project.Ci?.Rules.Revision is { } revision ? LoadProject(revision.PreviousVersion).Ci : null;
+if (previousProfile?.Hash != project.Ci?.Rules.Revision?.PreviousHash) throw new InvalidDataException("Previous policy differs from the installed revision approval.");
 var store = new TaskStore(new FactoryDatabase(directory, postgres), new Lifecycle(project, project.Ci, expertRuntime, ownerRuntime),
-    () => LoadProject(project.Policy.Version), stallSeconds, project.Ci, fundingProfile, ownerRuntime is not null);
+    () => LoadProject(project.Policy.Version), stallSeconds, project.Ci, fundingProfile, ownerRuntime is not null, previousProfile);
 store.BindProject(project.Ci?.Hash ?? "shipping/v1");
 var checkpoint = store.LatestRestore();
 var restorePaused = checkpoint is { ReleasedUtc: null };
@@ -201,6 +203,8 @@ if (project.Ci is not null)
 }
 if (github is not null)
 {
+    app.MapGet("/api/github/issues/{number:int}/revision", (int number, Guid taskId) => github.PreviewRevision(number,taskId));
+    app.MapPost("/api/github/issues/{number:int}/revision", (int number, RevisionCommand command) => github.ResumeRevision(number,command));
     app.MapGet("/api/github/issues/{number:int}/actions", (int number, Guid taskId, string headSha) =>
         github.IssueActionPreview(number,taskId,headSha));
     app.MapPost("/api/github/issues/{number:int}/actions/{kind}", (int number,string kind,IssueActionCommand command) =>

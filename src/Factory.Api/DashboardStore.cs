@@ -71,10 +71,11 @@ public sealed partial class TaskStore
         while (rows.Read()) messages.Add(JsonSerializer.Deserialize<Discussion>(rows.GetString(0), Wire.Json)!);
         return new { task.Id, task.Goal, task.OwnerId, task.Phase, task.Activity, task.Scenario, task.OpenedAt,
             issueFinished = issueAction?.Stage=="finished", nextAction = issueAction?.Stage=="finished"
-                ? "Issue closed. Read the final summary on GitHub." : repository?.Draft is null ? owner.NextAction : "Inspect the Draft PR and hosted checks",
+                ? "Issue closed. Read the final summary on GitHub." : previousProfile is not null && ProfileFor(task) == previousProfile && task.Activity == Activity.Blocked ? "Select Revise and resume to review the new files and checks." : repository?.Draft is null ? owner.NextAction : "Inspect the Draft PR and hosted checks",
             draftNumber = repository?.Draft?.Number, run = task.Run is { } run ? new { run.RunId, run.Phase } : null, task.History, messages, brief = memory.Briefs[^1],
             summary = DeliverySummary.From(task, memory.Documents.First(d => d.Part == SourcePart.Source).Path,
-                ciProfile?.Rules.RepositoryLayout, repository is not null),
+                ProfileFor(task)?.Rules.RepositoryLayout, repository is not null),
+            revisionAvailable = previousProfile is not null && task.Policy?.Version == previousProfile.Rules.Policy.Version && task.Activity == Activity.Blocked && task.Phase == Phase.Verification,
             issueAction, previousDrafts,
             recovery, repository, decisions = memory.Decisions, task.Question, task.Advice, task.HumanChoice,
             questionKey = QuestionKey(task), choices = task.Activity == Activity.Waiting ? lifecycle.Choices(task) : [] };
@@ -84,7 +85,7 @@ public sealed partial class TaskStore
     {
         var task = ReadTask(s, id);
         return new { task.Id, task.Receipts, task.RejectedReceipt, task.Candidate, task.Review,
-            ciPolicy = ciProfile?.Rules, ciBudget = CiBudget(s, id), ciExecutions = CiEvidence(s, id),
+            earlierVerification = ArchivedVerification(s, id), ciPolicy = ProfileFor(task)?.Rules, ciBudget = CiBudget(s, id), ciExecutions = CiEvidence(s, id),
             documents = lifecycle.Memory(task).Documents.Select(d => new { d.Part, d.Path, d.Digest, d.Revision }), gates = ReadGates(s, id) };
     });
 
@@ -103,8 +104,10 @@ public sealed partial class TaskStore
         task.Gates = ReadGates(s, id);
         var owner = lifecycle.Memory(task).View(task);
         var reply = Reply(task, owner, text);
+        if (previousProfile is not null && ProfileFor(task) == previousProfile && task.Activity == Activity.Blocked && reply.StartsWith("Verification stopped.", StringComparison.Ordinal))
+            reply += "\nSelect Revise and resume to review the new files and rules.";
         var added = new Discussion(messageId, task.History.Count, text, reply, DateTimeOffset.UtcNow);
-        if (liveOwner && reply == SavedNote && text.EndsWith('?'))
+        if (liveOwner && ProfileFor(task) == ciProfile && reply == SavedNote && text.EndsWith('?'))
         {
             if (task.Activity == Activity.Waiting && task.Question is { Reserved: true } question)
                 added = added with { Reply = question.Text + " This choice is reserved for the operator. Use a decision button to record it." };
@@ -153,7 +156,7 @@ public sealed partial class TaskStore
 
         // The original brief records the installed checks even when the operator revises the goal.
         if (task.FollowUp is not null)
-            foreach (var rule in owner.Briefs[0].Requirements.Criteria.Where(c => failed.Any(f => f.Id == c.Id)))
+            foreach (var rule in (owner.Briefs[^1].Requirements.Criteria.Any(c => c.Text.StartsWith("Pass the installed ", StringComparison.Ordinal)) ? owner.Briefs[0] : owner.Briefs[^1]).Requirements.Criteria.Where(c => failed.Any(f => f.Id == c.Id)))
                 lines.Add($"The installed requirement for {rule.Id} says “{rule.Text}”");
 
         lines.Add("This revision cannot go to review. Open Evidence to inspect the failed checks before deciding what to change.");

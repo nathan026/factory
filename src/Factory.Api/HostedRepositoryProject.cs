@@ -2,7 +2,7 @@ using System.Text;
 
 namespace Factory;
 
-// A deployment-installed brief admits one source file. All implementation, CI and review are external phases.
+// A deployment-installed brief identifies the files the issue can change. All implementation, CI and review are external phases.
 public sealed class HostedRepositoryProject : IControlledProject
 {
     private readonly RepositoryLayout layout;
@@ -19,23 +19,24 @@ public sealed class HostedRepositoryProject : IControlledProject
         Ci = ci;
         layout = ci.Rules.RepositoryLayout ?? throw new InvalidDataException("Expected a scoped repository layout.");
         scenario = ci.Rules.HostedGitHub?.Issue?.Scenario ?? throw new InvalidDataException("Missing approved issue scenario.");
-        if (layout.AdditionalWrites is { Length: > 0 } || layout.AdditionalReads.Length != 0 ||
+        if (layout.AdditionalReads.Length != 0 ||
             ci.Rules.Blueprint?.EarlyChecks is not ["bounded-source"] || layout.Commands is not [["node", "verify.cjs"]])
-            throw new InvalidDataException("This hosted profile requires one source, bounded-source and the installed verifier.");
+            throw new InvalidDataException("This hosted profile requires bounded-source and the installed verifier.");
         string Read(string path) => File.ReadAllText(Path.Combine(directory, path)).ReplaceLineEndings("\n");
-        snapshot = new(Read(layout.Source), Read(layout.Decisions), Read(layout.Cases), "{}");
+        snapshot = new(Read(layout.Source), Read(layout.Decisions), Read(layout.Cases), System.Text.Json.JsonSerializer.Serialize((layout.AdditionalWrites ?? []).ToDictionary(p => p, Read)));
     }
 
     public bool Supports(string value) => scenario == value;
     public SourcePacket Snapshot() => snapshot;
     public ProjectBrief Describe(SourcePacket source) => new(new(Policy.RequiredChecks.Select(id => new Criterion(id,
-        id == "bounded-source" ? "Keep the candidate within the admitted source limit." : Goal)).ToArray(),
-        [Goal], ["Write only " + layout.Source + "."]),
+        Ci.Rules.Revision?.Criteria.SingleOrDefault(c => c.Id == id)?.Text ?? (id == "bounded-source" ? "Keep the candidate within the admitted source limit." : Goal))).ToArray(),
+        [Goal], ["Write only " + string.Join(", ", layout.Writable) + "."]),
         [SourceDocument.Capture(SourcePart.Source, layout.Source, source), SourceDocument.Capture(SourcePart.Decisions, layout.Decisions, source),
-         SourceDocument.Capture(SourcePart.Cases, layout.Cases, source)]);
+         SourceDocument.Capture(SourcePart.Cases, layout.Cases, source), .. (layout.AdditionalWrites ?? []).Select(path => SourceDocument.Capture(SourcePart.Source, path, source))]);
     public ProjectBrief FollowUpBrief(SourcePacket source)
     {
         var original = Describe(source);
+        if (Ci.Rules.Revision is not null) return original;
         var checks = original.Requirements.Criteria.Select(c => c.Id == "bounded-source" ? c :
             c with { Text = $"Pass the installed {c.Id} check." }).ToArray();
         return original with { Requirements = new(checks, ["Use the installed verifier."], original.Requirements.Exclusions) };
@@ -55,8 +56,17 @@ public sealed class HostedRepositoryProject : IControlledProject
     public DecisionResolution ApplyChoice(string choice, SourcePacket s) => throw new CommandConflict("No reserved choice in the approved scope.");
     public ExpertOpinion? Consult(ExpertRequest request) => null;
     public Decision? ResolveWithinScope(Question q, string? option, SourcePacket source, BriefRevision brief) => null;
-    public string? CandidateError(string candidate) => Encoding.UTF8.GetByteCount(candidate) is > 0 and <= 16384 && !candidate.Contains('\0')
-        ? null : "Candidate is outside the bounded source format.";
+    public string? CandidateError(string candidate)
+    {
+        if (layout.AdditionalWrites is { Length: > 0 })
+        {
+            try { layout.CandidateFiles(candidate); return null; }
+            catch (Exception ex) when (ex is InvalidDataException or System.Text.Json.JsonException)
+            { return "Candidate differs from the approved files or file size limit."; }
+        }
+        return Encoding.UTF8.GetByteCount(candidate) is > 0 and <= 16384 && !candidate.Contains('\0')
+            ? null : "Candidate is outside the bounded source format.";
+    }
     public IReadOnlyList<Check> LocalChecks(string candidate, Decision answer, SourcePacket source, string[] selectors) =>
         selectors is ["bounded-source"] ? [new("bounded-source", CandidateError(candidate) is null, "bounded-source")] : [];
     public string? VerificationError(Receipt r, Decision a, SourcePacket s) =>

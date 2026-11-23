@@ -19,6 +19,16 @@ public sealed partial class TaskStore
     public void BindProject(string profile) => database.Write(s =>
     {
         var prior = s.Text("SELECT profile FROM controller_project WHERE id=1");
+        if (ciProfile?.Rules.Revision is not null && prior is null)
+            throw new InvalidOperationException("A revision requires an existing project binding.");
+        if (prior is not null && previousProfile?.Hash == prior && ciProfile?.Rules.Revision?.PreviousHash == prior && ciProfile.Hash == profile)
+        {
+            // Keep the binding on the old policy until the operator accepts the new round.
+            var id = s.Text("SELECT id FROM tasks LIMIT 1");
+            if (id is null) throw new InvalidOperationException("No blocked task for the proposed revision.");
+            RevisionCheckpoint(s, Guid.Parse(id));
+            return true;
+        }
         if ((prior is not null && prior != profile) || (prior is null && profile != "shipping/v1" &&
             s.Text("SELECT id FROM tasks LIMIT 1") is not null))
             throw new InvalidOperationException("This state belongs to a different project profile.");
@@ -44,7 +54,10 @@ public sealed partial class TaskStore
 
     private static int AdmittedCiRounds(Session s, Guid taskId) => int.Parse(s.Text(
         """
-        SELECT CAST(COUNT(*) - COALESCE((SELECT MAX(ci_total) FROM github_issue_actions WHERE task_id=@task AND stage='started'),0) AS TEXT)
+        SELECT CAST(COUNT(*) - COALESCE((SELECT MAX(ci_total) FROM (
+            SELECT ci_total FROM github_issue_actions WHERE task_id=@task AND stage='started'
+            UNION ALL SELECT ci_total FROM verification_revisions WHERE task_id=@task
+        ) rounds),0) AS TEXT)
         FROM ci_runs WHERE task_id=@task
         """, ("task", taskId.ToString()))!);
 

@@ -86,7 +86,7 @@ public sealed partial class TaskStore
         var entries = new List<string>();
         void Add(WorkItem task, string path, DraftReceipt pr)
         {
-            var summary = DeliverySummary.From(task, path, ciProfile?.Rules.RepositoryLayout, true);
+            var summary = DeliverySummary.From(task, path, ProfileFor(task)?.Rules.RepositoryLayout, true);
             entries.Add($"### PR #{pr.Number}\n\n{DeliverySummary.Literal(task.FollowUp?.Scope ?? summary.Request ?? summary.Issue)}\n\n" + string.Join("\n", summary.Work.Concat(summary.Checks).Select(v => "- " + DeliverySummary.Literal(v))));
         }
         using (var cmd = s.Command("SELECT archived_task,origin,draft FROM github_issue_actions WHERE task_id=@t AND stage='started' ORDER BY sequence", ("t", current.Id.ToString())))

@@ -53,6 +53,7 @@ public sealed partial class GitHubSync(GitHubProject config, GitHubRepository re
         var approval = Approval(number);
         var status = store.GitHubStatusFor(config.RepositoryId, number);
         if (config.OperatorStart && status.TaskId is null) return status;
+        if (automatic && ci?.Rules.Revision is { } upgrade && status.Origin?.PolicyHash == upgrade.PreviousHash) return status;
         status = await Observe(approval, status);
         if (status.TaskId is not { } taskId || status.Draft is not null) return status;
 

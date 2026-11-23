@@ -99,6 +99,11 @@ CREATE TABLE IF NOT EXISTS github_issue_actions (
     PRIMARY KEY(id)
 );
 CREATE UNIQUE INDEX IF NOT EXISTS github_current_issue_action ON github_issue_actions(task_id,head_sha) WHERE stage <> 'withdrawn';
+CREATE TABLE IF NOT EXISTS verification_revisions (
+    task_id TEXT NOT NULL REFERENCES tasks(id), checkpoint TEXT NOT NULL, approval_id TEXT NOT NULL UNIQUE,
+    archived_task TEXT NOT NULL, origin TEXT NOT NULL, base_sha TEXT NOT NULL, policy_hash TEXT NOT NULL, ci_total INTEGER NOT NULL,
+    PRIMARY KEY(task_id,checkpoint)
+);
 CREATE TABLE IF NOT EXISTS github_branch_cleanup (
     action_id TEXT NOT NULL REFERENCES github_issue_actions(id), branch TEXT NOT NULL, result TEXT,
     PRIMARY KEY(action_id,branch)
