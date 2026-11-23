@@ -1,7 +1,8 @@
 """Project the controller-validated tool grant onto the controlled role's lease files."""
 import json
 import re
-from environment_leases import ROOT, fingerprint
+from environment_leases import fingerprint
+from worker_runtime import controller_directory
 
 SOURCE_FILES = {
     "Source": ("source.read", "source", "shipping-rule.json"),
@@ -24,7 +25,7 @@ def repository_rules(order):
     if not re.fullmatch(r"[a-z][a-z0-9-]*/v[1-9][0-9]*", version):
         raise ValueError("Invalid repository policy version")
     project, edition = version.split("/")
-    directory = ROOT / "src/Factory.Api/bin/Debug/net10.0/projects" / project
+    directory = controller_directory() / "projects" / project
     path = directory / (edition+"-policy.json")
     if not path.is_file():
         path = directory / "factory-policy.json"

@@ -8,10 +8,9 @@ import subprocess
 import time
 from threading import Thread
 
-from qualify_m0 import LABEL
-
-
 def check(context, lease, run, generation):
+    from qualify_m0 import LABEL  # Only the legacy M0 lease uses the qualification label.
+
     if not re.fullmatch(r"[0-9a-f]{64}", lease) or not re.fullmatch(r"[0-9a-f]{32}", run):
         raise ValueError("Invalid lease identity")
     def docker(*args):

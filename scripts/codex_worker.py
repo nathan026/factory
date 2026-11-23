@@ -17,9 +17,9 @@ from blueprint_tools import repository_rules
 from codex_workspace import open_workspace
 from environment_leases import ROOT, Leases, fingerprint
 from m0_lease_tool import tool_server
+from worker_runtime import controller_command, native_cli
 
-CLI = ROOT/"src/Factory.Runtime/node_modules/@openai/codex-win32-x64/vendor/x86_64-pc-windows-msvc/bin/codex.exe"
-DLL = ROOT/"src/Factory.Api/bin/Debug/net10.0/Factory.Api.dll"
+CLI = native_cli()
 PROFILE = "factory-summary/v2"
 
 
@@ -46,6 +46,8 @@ def supervise_tree():
 def environment():
     permitted = {"PATH","SYSTEMROOT","WINDIR","COMSPEC","PATHEXT","TEMP","TMP","USERPROFILE","LOCALAPPDATA",
                  "APPDATA","SYSTEMDRIVE","HOMEDRIVE","HOMEPATH","PROGRAMDATA","PROGRAMFILES","PROGRAMFILES(X86)","CODEX_HOME"}
+    if sys.platform == "linux":
+        permitted.add("HOME")
     return {**{k:v for k,v in os.environ.items() if k.upper() in permitted},"CODEX_EXEC_SERVER_URL":"none"}
 
 
@@ -216,7 +218,7 @@ def run(order,cancel,dispatch_deadline,session=None):
         raise ValueError("Unsupported live assignment")
     env = environment()
     a = order["assignment"]
-    bound = subprocess.run(["dotnet",DLL,"--codex-bindings"],input=json.dumps(order).encode(),capture_output=True,timeout=8)
+    bound = subprocess.run([*controller_command(),"--codex-bindings"],input=json.dumps(order).encode(),capture_output=True,timeout=8)
     if bound.returncode:
         raise ValueError("Work order failed admission")
     bindings = json.loads(bound.stdout)
@@ -336,5 +338,9 @@ def run(order,cancel,dispatch_deadline,session=None):
 
 
 if __name__ == "__main__":
-    guard = supervise_tree()
+    if sys.platform == "linux":
+        from linux_worker_service import supervise
+        supervise(sys.argv)
+    else:
+        guard = supervise_tree()
     print(json.dumps(run(json.load(sys.stdin.buffer),Path(sys.argv[1]),int(sys.argv[2])/1000,sys.argv[3] if len(sys.argv)>3 else None)),flush=True)
