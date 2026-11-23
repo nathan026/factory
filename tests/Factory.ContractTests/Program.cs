@@ -119,6 +119,19 @@ foreach (var policy in new[] { fixture.Policy, new ProjectPolicy("audit/v1",
     if (task.Activity != Activity.Blocked || task.Repairs != policy.MaxRepairs || task.Receipts.Count != policy.MaxRepairs + 1
         || task.Receipts.Any(r => r.PolicyVersion != policy.Version || r.Passed || !r.Checks.Select(c => c.Id).SequenceEqual(policy.RequiredChecks)))
         throw new Exception($"Incorrect restored verification policy or repair budget for {policy.Version}.");
+    var view = owner.Memory(task).View(task);
+    var failed = task.Receipts[^1].Checks.Where(c => !c.Passed).Select(c => c.Id).ToArray();
+    foreach (var statusPrompt in new[] {"What has happened?", "Why did verification fail?", $"Why did {failed[0]} fail?"})
+    {
+        var explanation = TaskStore.Reply(task,view,statusPrompt);
+        if (!failed.All(id => explanation.Contains($"The {id} check failed")) ||
+            !explanation.Contains($"{task.Repairs} of {policy.MaxRepairs}") || !explanation.Contains("Open Evidence"))
+            throw new Exception("Blocked reply lost the failed checks, repair limit or next step.");
+    }
+    var last = task.Gates[^1];
+    task.Gates[^1] = last with { ReceiptHash = new string('0',64) };
+    if (TaskStore.Reply(task,view,"What has happened?").Contains("check failed"))
+        throw new Exception("A stale receipt was described as the reason for this stop.");
     Console.WriteLine($"Passed: {policy.Version} check coverage and cumulative repair budget across restore");
 }
 try

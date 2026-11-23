@@ -111,6 +111,8 @@ public sealed partial class TaskStore
             else
                 added = QueueDiscussion(s, task, added);
         }
+        else if (reply == SavedNote && text.EndsWith('?'))
+            added = added with { Reply = "I could not answer that question from the task record. Ask about the current status or name a check or decision from the brief." };
         s.Execute("""
             INSERT INTO task_discussion(task_id,message_id,seq,exchange)
             VALUES(@id,@message,(SELECT COALESCE(MAX(seq),0)+1 FROM task_discussion WHERE task_id=@id),@exchange)
@@ -122,12 +124,54 @@ public sealed partial class TaskStore
 
     private const string SavedNote = "Your note is saved in this conversation. I can report the accepted brief, status, verification checks or decision options from this task’s record.";
 
-    private static string Reply(WorkItem task, OwnerView owner, string text)
+    private static string? VerificationStop(WorkItem task, OwnerView owner)
+    {
+        var gate = task.Gates.LastOrDefault();
+        var receipt = task.Receipts.LastOrDefault();
+        if (task.Activity != Activity.Blocked || task.Phase != Phase.Verification ||
+            gate is not { Outcome: GateOutcome.Block, Input.Phase: Phase.Verification } ||
+            receipt is not { Passed: false } || task.RejectedReceipt?.Index == task.Receipts.Count - 1 ||
+            gate.ReceiptHash != GateInput.Hash(receipt) || gate.Input.RunId != receipt.RunId ||
+            ContractGate.ReceiptError(task, receipt) is not null)
+            return null;
+
+        var failed = receipt.Checks.Where(c => !c.Passed).ToArray();
+        var lines = new List<string> { "Verification stopped." };
+        var previous = task.Receipts.Count > 1 ? task.Receipts[^2] : null;
+        var previousChecked = previous is { Passed: false } && task.Gates.Any(g =>
+            g.Input.Phase == Phase.Verification && g.Outcome == GateOutcome.Revise && g.ReceiptHash == GateInput.Hash(previous));
+        foreach (var check in failed)
+        {
+            bool repeated = previousChecked && previous!.Checks.Any(c => c.Id == check.Id && !c.Passed);
+            lines.Add($"The {check.Id} check failed{(repeated ? " before and after the repair" : "")}." +
+                (check.Id == check.Assertion ? "" : $" {check.Assertion}"));
+        }
+        if (gate.Repairs == task.Policy!.MaxRepairs)
+            lines.Add($"The task used {gate.Repairs} of {task.Policy.MaxRepairs} permitted repair attempts.");
+        else
+            lines.Add(gate.Reason);
+
+        // The original brief records the installed checks even when the operator revises the goal.
+        if (task.FollowUp is not null)
+            foreach (var rule in owner.Briefs[0].Requirements.Criteria.Where(c => failed.Any(f => f.Id == c.Id)))
+                lines.Add($"The installed requirement for {rule.Id} says “{rule.Text}”");
+
+        lines.Add("This revision cannot go to review. Open Evidence to inspect the failed checks before deciding what to change.");
+        return string.Join("\n", lines);
+    }
+
+    internal static string Reply(WorkItem task, OwnerView owner, string text)
     {
         // Resolve an explicit project reference from this task's retained brief before classifying general topics.
         bool RefersTo(string id) => Regex.IsMatch(text,
             @"(?<![\p{L}\p{N}_/-])" + Regex.Escape(id) + @"(?![\p{L}\p{N}_/-])",
             RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        var words = Regex.Matches(text.ToLowerInvariant(), @"[\p{L}\p{N}]+").Select(m => m.Value).ToHashSet();
+        bool Mentions(params string[] terms) => terms.Any(words.Contains);
+        var statusQuestion = Mentions("status", "next", "progress", "phase", "worker", "blocked", "stopped",
+            "happening", "happened", "update", "outcome") || text.Contains("going on", StringComparison.OrdinalIgnoreCase)
+            || text.Contains("went wrong", StringComparison.OrdinalIgnoreCase);
+        var checksQuestion = Mentions("failed", "fail", "failure", "checks", "evidence", "verification", "repair", "test", "tests");
         var briefVersion = owner.Briefs[^1];
         var answers = new List<string>();
         foreach (var decision in owner.Decisions.Where(d => d.Scope == task.Id && RefersTo(d.Decision.Id)))
@@ -138,16 +182,18 @@ public sealed partial class TaskStore
         }
         foreach (var criterion in briefVersion.Requirements.Criteria.Where(c => RefersTo(c.Id)))
             answers.Add($"{criterion.Id} (brief v{briefVersion.Version}). {criterion.Text}");
+        if ((statusQuestion || checksQuestion) && (answers.Count == 0 ||
+            task.Receipts.LastOrDefault()?.Checks?.Any(c => c is { Passed: false, Id: not null } && RefersTo(c.Id)) == true) &&
+            VerificationStop(task, owner) is { } stopped)
+            return stopped;
         if (answers.Count > 0) return string.Join("\n", answers);
 
-        var words = Regex.Matches(text.ToLowerInvariant(), @"[\p{L}\p{N}]+").Select(m => m.Value).ToHashSet();
-        bool Mentions(params string[] terms) => terms.Any(words.Contains);
         if (Mentions("expert", "consultation", "uncertainty", "assumptions", "advisor") &&
             task.Advice?.Consultation is { } consultation)
             return $"{consultation.ProfileVersion}: {consultation.Conclusion} {task.Advice.Recommendation} "
                 + $"{consultation.Assumption} {consultation.Uncertainty} Sources: {task.Advice.Source}. "
                 + $"Decision authority: {consultation.RequiredAuthority}.";
-        if (Mentions("failed", "fail", "failure", "checks", "evidence", "verification", "repair", "test", "tests"))
+        if (checksQuestion)
         {
             var localFailure = task.Gates.LastOrDefault(g => g.Input.Phase == Phase.Implementation &&
                 g.Criteria.Any(c => c.Id.StartsWith("local/", StringComparison.Ordinal) && !c.Passed));
@@ -175,8 +221,14 @@ public sealed partial class TaskStore
             return $"Brief v{brief.Version}: {brief.Goal} " + string.Join(" ", brief.Requirements.Criteria.Select(c => c.Text))
                 + (brief.Plan is null ? "" : " Plan: " + brief.Plan);
         }
-        if (Mentions("status", "next", "progress", "phase", "worker", "blocked", "happening"))
-            return $"{task.Phase} · {task.Activity}. {owner.NextAction.TrimEnd('.')}. " + task.History.LastOrDefault()?.Text;
+        if (statusQuestion)
+            return task.Activity switch
+            {
+                Activity.Blocked => $"The task stopped during {task.Phase.ToString().ToLowerInvariant()}. {owner.NextAction}",
+                Activity.Waiting => $"The task is waiting for your decision. {task.Question?.Text}",
+                Activity.Delivered => "The task reached delivery. " + owner.NextAction.TrimEnd('.') + ".",
+                _ => $"{task.Phase} is {task.Activity.ToString().ToLowerInvariant()}. {owner.NextAction.TrimEnd('.')}."
+            };
         return SavedNote;
     }
 }

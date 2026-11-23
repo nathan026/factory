@@ -26,6 +26,13 @@ try {
   const button = (page, name) => page.getByRole("button", { name, exact: true });
   const keep = (page) => button(page, "Keep 5000 cents");
   const thread = (page) => page.locator(".thread");
+  const latest = (page) => page.getByRole("region", {name:"Latest owner reply"});
+  async function expectReplyInView(page) {
+    await page.waitForFunction(() => {
+      const reply = document.querySelector(".latest-reply .reply-text")?.getBoundingClientRect();
+      return reply && reply.top >= 0 && reply.bottom <= innerHeight;
+    });
+  }
   await signIn(phone);
   await phone.getByLabel("Sample task").selectOption("scope-change");
   const opening = "Please keep a record of the threshold discussion.";
@@ -58,11 +65,11 @@ try {
   await button(phone, "Send message").click();
   await phone.getByRole("alert").waitFor();
   await button(phone, "Send message").click();
-  await thread(phone).getByText(note, { exact: true }).waitFor();
-  await thread(phone)
-    .getByText(/Use a decision button to record your choice/)
-    .waitFor();
-  assert.equal(await thread(phone).getByText(note, { exact: true }).count(), 1);
+  await latest(phone).getByText(/Use a decision button to record your choice/).waitFor();
+  await expectReplyInView(phone);
+  await latest(phone).getByText("Your message", {exact:true}).click();
+  await latest(phone).getByText(note, {exact:true}).waitFor();
+  assert.equal(await phone.getByText(note, {exact:true}).count(), 1);
   assert.equal(messageIds.length, 2);
   assert.equal(messageIds[0], messageIds[1]);
   await button(phone, "Brief").click();
@@ -94,17 +101,23 @@ try {
   await desk.getByRole("button", { name: /^Decisions 1$/ }).click();
   assert.equal(await desk.locator(".queue-task").count(), 1);
   await desk.locator(".queue-task").click();
-  await thread(desk).getByText(note, { exact: true }).waitFor();
+  await latest(desk).getByText(/Use a decision button to record your choice/).waitFor();
   await keep(desk).focus();
   await desk.keyboard.press("Enter");
   await thread(desk).getByText("Local evidence package ready for inspection.", { exact: true }).waitFor();
   assert.equal(await desk.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+  await desk.getByLabel("Message the lifecycle owner").fill("What has happened?");
+  await button(desk,"Send message").click();
+  await latest(desk).getByText(/The task reached delivery/).waitFor();
+  await expectReplyInView(desk);
+  await thread(desk).getByText(note, {exact:true}).waitFor();
   await mobile.setOffline(false);
   await phone.locator(".task-heading").getByText("Delivered locally").waitFor();
   await phone.getByText("Operator · Reserved product decision").waitFor();
   await phone.reload();
   await phone.getByRole("heading", { name: "Evaluate a scope change" }).waitFor();
-  await thread(phone).getByText(note, { exact: true }).waitFor();
+  await latest(phone).getByText(/The task reached delivery/).waitFor();
+  await thread(phone).getByText(note, {exact:true}).waitFor();
   assert.equal(
     reads.some((p) => p === "/api/tasks" || p.endsWith("/evidence") || p.includes("/owner/documents/")),
     false,

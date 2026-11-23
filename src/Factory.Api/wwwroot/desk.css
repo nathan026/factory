@@ -406,6 +406,13 @@ article,
 .composer + h3 {
   margin: 1.65rem 0 0.8rem;
 }
+.latest-reply {
+  margin: 1rem 0;
+  overflow-wrap: anywhere;
+}
+.latest-reply .reply-text {
+  white-space: pre-line;
+}
 .line {
   display: grid;
   grid-template-columns: 2.15rem minmax(0, 1fr);

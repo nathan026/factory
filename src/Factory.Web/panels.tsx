@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from "react";
-import { Api, Evidence, Workspace } from "./types";
+import React, { useEffect, useRef, useState } from "react";
+import { Api, Evidence, Exchange, Workspace } from "./types";
 
 export function Conversation({
   task,
@@ -16,8 +16,18 @@ export function Conversation({
   const [draft, setDraft] = useState(() => sessionStorage.getItem(key) || "");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [sent, setSent] = useState<Exchange | null>(null);
+  const replyPanel = useRef<HTMLElement>(null);
+  // Use the acknowledgement immediately. Polling supplies subsequent owner updates.
+  const latest = sent && !task.messages.some(m => m.id === sent.id) ? sent : task.messages.at(-1);
+  useEffect(() => {
+    if (!sent) return;
+    replyPanel.current?.focus({ preventScroll: true });
+    replyPanel.current?.scrollIntoView({ block: "nearest" });
+  }, [sent]);
   const messages = new Map<number, typeof task.messages>();
   for (const message of task.messages) {
+    if (message.id === latest?.id) continue;
     const group = messages.get(message.afterEntry) ?? [];
     group.push(message);
     messages.set(message.afterEntry, group);
@@ -35,7 +45,8 @@ export function Conversation({
     setBusy(true);
     setError("");
     try {
-      await api("tasks/" + task.id + "/messages", { body: { id, text: draft.trim() } });
+      const exchange = await api<Exchange>("tasks/" + task.id + "/messages", { body: { id, text: draft.trim() } });
+      setSent(exchange);
       edit("");
       changed();
     } catch (e) {
@@ -70,6 +81,13 @@ export function Conversation({
         </div>
         {error && <p role="alert">{error}</p>}
       </form>
+      {latest && (
+        <section className="reading latest-reply" aria-label="Latest owner reply" ref={replyPanel} tabIndex={-1}>
+          <h3>Latest owner reply</h3>
+          <p className="reply-text" aria-live="polite">{latest.reply}</p>
+          <details><summary>Your message</summary><p>{latest.text}</p></details>
+        </section>
+      )}
       <h3>Conversation &amp; activity</h3>
       <ol className="thread">
         {exchanges(0)}
