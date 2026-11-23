@@ -68,7 +68,7 @@ public record ScopeReply(string RequestHash, string Reply, ScopeProposal? Propos
         if (Proposal is null) return Reply;
         var checks = Proposal.Checks is { Length: > 0 and <= 16 } items &&
             items.All(c => !string.IsNullOrWhiteSpace(c) && c.Length <= 2000)
-            ? "\n\nSuggested checks\n" + string.Join("\n", items.Select(c => "â€¢ " + c)) : "";
+            ? "\n\nSuggested checks\n" + string.Join("\n", items.Select(c => "• " + c)) : "";
         return Reply + checks;
     }
 }
