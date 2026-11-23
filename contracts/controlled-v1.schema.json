@@ -1,0 +1,242 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Controlled lifecycle contracts v1",
+  "oneOf": [
+    { "$ref": "#/$defs/assignment" },
+    { "$ref": "#/$defs/workerResult" },
+    { "$ref": "#/$defs/receipt" },
+    { "$ref": "#/$defs/policy" },
+    { "$ref": "#/$defs/phaseContext" },
+    { "$ref": "#/$defs/gateEvaluation" }
+  ],
+  "$defs": {
+    "id": { "type": "string", "format": "uuid", "not": { "const": "00000000-0000-0000-0000-000000000000" } },
+    "hash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "text": { "type": "string", "pattern": "\\S" },
+    "checkIds": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "#/$defs/text" } },
+    "policy": {
+      "type": "object", "additionalProperties": false,
+      "required": ["version", "requiredChecks", "maxRepairs"],
+      "properties": {
+        "version": { "$ref": "#/$defs/text" },
+        "requiredChecks": { "$ref": "#/$defs/checkIds" },
+        "maxRepairs": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "reference": {
+      "type": "object",
+      "required": ["schemaVersion", "taskId", "runId", "phase", "inputHash", "sourceHash", "policyVersion"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "taskId": { "$ref": "#/$defs/id" }, "runId": { "$ref": "#/$defs/id" },
+        "phase": { "enum": ["Planning", "Implementation", "Verification", "Review"] },
+        "inputHash": { "$ref": "#/$defs/hash" }, "sourceHash": { "$ref": "#/$defs/hash" },
+        "policyVersion": { "$ref": "#/$defs/text" }
+      }
+    },
+    "decision": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "subject", "text", "value"],
+      "properties": {
+        "id": {"$ref": "#/$defs/text"},
+        "subject": {"$ref": "#/$defs/text"},
+        "text": {"$ref": "#/$defs/text"},
+        "value": {"$ref": "#/$defs/text"}
+      }
+    },
+    "decisionRecord": {
+      "type": "object", "additionalProperties": false,
+      "required": ["decision", "questionSubject", "actor", "authority", "scope", "rationale", "recordedAt", "sources", "historyEntry", "supersedes"],
+      "properties": {
+        "decision": {"$ref": "#/$defs/decision"},
+        "questionSubject": {"$ref": "#/$defs/text"},
+        "actor": {"$ref": "#/$defs/text"},
+        "authority": {"$ref": "#/$defs/text"},
+        "scope": {"$ref": "#/$defs/id"},
+        "rationale": {"$ref": "#/$defs/text"},
+        "recordedAt": {"anyOf": [{"type": "string", "format": "date-time"}, {"type": "null"}]},
+        "sources": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/text"}},
+        "historyEntry": {"anyOf": [{"type": "integer", "minimum": 1}, {"type": "null"}]},
+        "supersedes": {"anyOf": [{"$ref": "#/$defs/text"}, {"type": "null"}]}
+      }
+    },
+    "briefRevision": {
+      "type": "object", "additionalProperties": false,
+      "required": ["version", "goal", "requirements", "plan", "acceptedDecision"],
+      "properties": {
+        "version": {"type": "integer", "minimum": 1},
+        "goal": {"$ref": "#/$defs/text"},
+        "requirements": {
+          "type": "object", "additionalProperties": false, "required": ["criteria", "constraints", "exclusions"],
+          "properties": {
+            "criteria": {
+              "type": "array", "minItems": 1, "items": {
+                "type": "object", "additionalProperties": false, "required": ["id", "text"],
+                "properties": {"id": {"$ref": "#/$defs/text"}, "text": {"$ref": "#/$defs/text"}}
+              }
+            },
+            "constraints": {"type": "array", "items": {"$ref": "#/$defs/text"}},
+            "exclusions": {"type": "array", "items": {"$ref": "#/$defs/text"}}
+          }
+        },
+        "plan": {"anyOf": [{"$ref": "#/$defs/text"}, {"type": "null"}]},
+        "acceptedDecision": {"anyOf": [{"$ref": "#/$defs/decision"}, {"type": "null"}]}
+      }
+    },
+    "sourceDocument": {
+      "type": "object", "additionalProperties": false,
+      "required": ["part", "path", "revision", "digest", "excerpt", "complete"],
+      "properties": {
+        "part": {"enum": ["Source", "Decisions", "Cases"]},
+        "path": {"$ref": "#/$defs/text"},
+        "revision": {"$ref": "#/$defs/hash"},
+        "digest": {"$ref": "#/$defs/hash"},
+        "excerpt": {"type": "string"},
+        "complete": {"type": "boolean"}
+      }
+    },
+    "phaseContext": {
+      "type": "object", "additionalProperties": false,
+      "required": ["schemaVersion", "ownerId", "assignment", "action", "brief", "policy", "decisions", "documents", "findings"],
+      "properties": {
+        "schemaVersion": {"const": 1},
+        "ownerId": {"$ref": "#/$defs/id"},
+        "assignment": {"$ref": "#/$defs/reference", "unevaluatedProperties": false},
+        "action": {"enum": ["Plan", "Ask", "Implement", "Verify", "Review"]},
+        "brief": {"$ref": "#/$defs/briefRevision"},
+        "policy": {"$ref": "#/$defs/policy"},
+        "decisions": {"type": "array", "minItems": 0, "items": {"$ref": "#/$defs/decisionRecord"}},
+        "documents": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/sourceDocument"}},
+        "blueprint": {
+          "type": "object", "additionalProperties": false, "required": ["manifestHash", "tools", "openingReferences", "localFeedback"],
+          "properties": {
+            "manifestHash": {"$ref": "#/$defs/hash"},
+            "tools": {"type":"array","minItems":1,"uniqueItems":true,"items":{"type":"string"}},
+            "openingReferences": {"type":"array","uniqueItems":true,"items":{"type":"string"}},
+            "localFeedback": {"type":"array","items":{"$ref":"#/$defs/gateEvaluation/properties/criteria/items"}}
+          }
+        },
+        "ownerReply": {
+          "type": "object", "additionalProperties": false,
+          "required": ["askingRun", "recipientRun", "question", "answer", "evidenceDigest"],
+          "properties": {
+            "askingRun": {"$ref": "#/$defs/id"}, "recipientRun": {"$ref": "#/$defs/id"},
+            "question": {"type": "string"}, "answer": {"type": "string"}, "evidenceDigest": {"$ref": "#/$defs/hash"}
+          }
+        },
+        "reviewFeedback": {"$ref": "#/$defs/review"},
+        "findings": {
+          "type": "array", "items": {
+            "type": "object", "additionalProperties": false, "required": ["runId", "candidateHash", "checks"],
+            "properties": {
+              "runId": {"$ref": "#/$defs/id"}, "candidateHash": {"$ref": "#/$defs/hash"},
+              "checks": {"$ref": "#/$defs/receipt/properties/checks"}
+            }
+          }
+        }
+      }
+    },
+    "assignment": {
+      "$ref": "#/$defs/reference", "unevaluatedProperties": false,
+      "required": ["objective", "requiredChecks"],
+      "properties": {
+        "objective": { "$ref": "#/$defs/text" }, "requiredChecks": { "$ref": "#/$defs/checkIds" }
+      }
+    },
+    "question": {
+      "type": "object", "additionalProperties": false, "required": ["subject", "text", "reserved"],
+      "properties": {
+        "subject": { "$ref": "#/$defs/text" }, "text": { "$ref": "#/$defs/text" }, "reserved": { "type": "boolean" }
+      }
+    },
+    "reviewEvidence": {
+      "type": "object", "additionalProperties": false, "required": ["verifierRunId", "checksHash", "briefHash", "findings"],
+      "properties": {
+        "verifierRunId": {"$ref": "#/$defs/id"}, "checksHash": {"$ref": "#/$defs/hash"}, "briefHash": {"$ref": "#/$defs/hash"},
+        "findings": {"type": "array", "items": {
+          "type": "object", "additionalProperties": false, "required": ["criterion", "severity", "evidence", "recommendation"],
+          "properties": {"criterion": {"$ref": "#/$defs/text"}, "severity": {"enum": ["Advisory", "Blocking"]},
+            "evidence": {"$ref": "#/$defs/text"}, "recommendation": {"$ref": "#/$defs/text"}}
+        }}
+      }
+    },
+    "review": {
+      "type": "object", "additionalProperties": false, "required": ["runId", "candidateHash", "approved", "finding"],
+      "properties": {
+        "runId": { "$ref": "#/$defs/id" }, "candidateHash": { "$ref": "#/$defs/hash" },
+        "evidence": {"$ref": "#/$defs/reviewEvidence"},
+        "approved": { "type": "boolean" }, "finding": { "$ref": "#/$defs/text" }
+      }
+    },
+    "nullableId": {"anyOf": [{"$ref": "#/$defs/id"}, {"type": "null"}]},
+    "nullableHash": {"anyOf": [{"$ref": "#/$defs/hash"}, {"type": "null"}]},
+    "gatePhase": {"enum": ["Planning", "Implementation", "Verification", "Review", "Delivery"]},
+    "gateEvaluation": {
+      "type": "object", "additionalProperties": false,
+      "required": ["sequence", "ruleVersion", "evaluatedAt", "input", "outcome", "artifactHash", "planEvidenceHash",
+        "nextBriefHash", "receiptHash", "criteria", "reason", "nextPhase", "nextActivity", "repairs"],
+      "properties": {
+        "sequence": {"type": "integer", "minimum": 1}, "ruleVersion": {"const": "controlled-phase-gates/v1"},
+        "evaluatedAt": {"type": "string", "format": "date-time"},
+        "input": {
+          "type": "object", "additionalProperties": false,
+          "required": ["taskId", "phase", "runId", "operationId", "sessionId", "briefVersion", "briefHash", "profileVersion",
+            "profileHash", "sourceHash", "inputHash", "candidateHash", "outputHash"],
+          "properties": {
+            "taskId": {"$ref": "#/$defs/id"}, "phase": {"$ref": "#/$defs/gatePhase"}, "runId": {"$ref": "#/$defs/nullableId"},
+            "operationId": {"type": ["string", "null"]}, "sessionId": {"$ref": "#/$defs/nullableId"},
+            "briefVersion": {"type": ["integer", "null"], "minimum": 1}, "briefHash": {"$ref": "#/$defs/nullableHash"},
+            "profileVersion": {"type": ["string", "null"]}, "profileHash": {"$ref": "#/$defs/nullableHash"},
+            "sourceHash": {"$ref": "#/$defs/hash"}, "inputHash": {"$ref": "#/$defs/nullableHash"},
+            "candidateHash": {"$ref": "#/$defs/nullableHash"}, "outputHash": {"$ref": "#/$defs/nullableHash"}
+          }
+        },
+        "outcome": {"enum": ["Pass", "Revise", "Block", "Escalate", "Resume"]},
+        "artifactHash": {"$ref": "#/$defs/nullableHash"}, "planEvidenceHash": {"$ref": "#/$defs/nullableHash"},
+        "nextBriefHash": {"$ref": "#/$defs/nullableHash"}, "receiptHash": {"$ref": "#/$defs/nullableHash"},
+        "criteria": {"type": "array", "minItems": 1, "items": {
+          "type": "object", "additionalProperties": false, "required": ["id", "passed", "finding"],
+          "properties": {"id": {"$ref": "#/$defs/text"}, "passed": {"type": "boolean"}, "finding": {"$ref": "#/$defs/text"}}
+        }},
+        "reason": {"$ref": "#/$defs/text"}, "nextPhase": {"$ref": "#/$defs/gatePhase"},
+        "nextActivity": {"enum": ["Queued", "Running", "Waiting", "Blocked", "Delivered"]},
+        "expertProfileHash": {"$ref": "#/$defs/hash"}, "adviceHash": {"$ref": "#/$defs/hash"},
+        "repairs": {"type": "integer", "minimum": 0}
+      }
+    },
+    "planEvidence": {
+      "type": "object", "additionalProperties": false, "required": ["affectedPaths", "requiredChecks", "dependencies", "risk", "briefHash"],
+      "properties": {
+        "affectedPaths": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/text"}},
+        "requiredChecks": {"$ref": "#/$defs/checkIds"},
+        "dependencies": {"type": "array", "items": {"$ref": "#/$defs/text"}},
+        "risk": {"$ref": "#/$defs/text"}, "briefHash": {"$ref": "#/$defs/hash"}
+      }
+    },
+    "workerResult": {
+      "type": "object", "additionalProperties": false, "required": ["assignment", "status", "output"],
+      "properties": {
+        "planEvidence": {"$ref": "#/$defs/planEvidence"},
+        "assignment": { "$ref": "#/$defs/reference", "unevaluatedProperties": false },
+        "status": { "enum": ["Completed", "NeedsInput", "Blocked", "Failed", "Cancelled"] },
+        "output": { "oneOf": [{ "$ref": "#/$defs/text" }, { "$ref": "#/$defs/question" }, { "$ref": "#/$defs/review" }] }
+      }
+    },
+    "receipt": {
+      "type": "object", "additionalProperties": false,
+      "required": ["schemaVersion", "taskId", "runId", "candidate", "candidateHash", "sourceHash", "policyVersion", "gateVersion", "checks"],
+      "properties": {
+        "schemaVersion": { "const": 1 }, "taskId": { "$ref": "#/$defs/id" }, "runId": { "$ref": "#/$defs/id" },
+        "candidate": { "$ref": "#/$defs/text" }, "candidateHash": { "$ref": "#/$defs/hash" },
+        "sourceHash": { "$ref": "#/$defs/hash" }, "policyVersion": { "$ref": "#/$defs/text" },
+        "gateVersion": { "const": "controlled-verification/v2" }, "passed": { "type": "boolean", "readOnly": true },
+        "checks": {
+          "type": "array", "minItems": 1, "items": {
+            "type": "object", "additionalProperties": false, "required": ["id", "assertion", "passed"],
+            "properties": { "id": { "$ref": "#/$defs/text" }, "assertion": { "$ref": "#/$defs/text" }, "passed": { "type": "boolean" } }
+          }
+        }
+      }
+    }
+  }
+}

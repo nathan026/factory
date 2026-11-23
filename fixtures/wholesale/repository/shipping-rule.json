@@ -1,0 +1,4 @@
+{
+  "thresholdCents": 25000,
+  "comparison": "greater"
+}

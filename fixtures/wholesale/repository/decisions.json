@@ -1,0 +1,8 @@
+[
+  {
+    "id": "WHOLESALE-01",
+    "subject": "standard-threshold",
+    "text": "Orders at 25000 cents qualify for wholesale shipping. Wholesale thresholds must be whole-dollar amounts of at least 10000 cents.",
+    "value": "25000"
+  }
+]

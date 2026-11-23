@@ -1,0 +1,22 @@
+[
+  {
+    "offsetCents": -100,
+    "freeShipping": false
+  },
+  {
+    "offsetCents": -1,
+    "freeShipping": false
+  },
+  {
+    "offsetCents": 0,
+    "freeShipping": true
+  },
+  {
+    "offsetCents": 1,
+    "freeShipping": true
+  },
+  {
+    "offsetCents": 100,
+    "freeShipping": true
+  }
+]

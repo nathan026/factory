@@ -1,0 +1,85 @@
+{
+  "policy": {
+    "version": "checkout-scope/v1",
+    "requiredChecks": [
+      "order-offset/-1",
+      "order-offset/0",
+      "order-offset/1"
+    ],
+    "maxRepairs": 1
+  },
+  "goal": "Correct the inclusive free shipping boundary while preserving the accepted amount.",
+  "environment": "node:22-bookworm-slim@sha256:e9f565d32859f0cbfb52125eafe8be39390f24dac302dc3cdf566e8ba3ab21ee",
+  "script": "fixtures/retail/repository/verify.cjs",
+  "scriptHash": "dedb83bff1c3bc885aff82e1a17ae6653cac035b1f5c45000bc763dd4029f92d",
+  "requiredRoles": [
+    "Planner",
+    "Implementer",
+    "Verifier",
+    "Reviewer"
+  ],
+  "publication": "reviewed-draft",
+  "promotion": "human",
+  "settings": {
+    "proposedThreshold": 4000,
+    "base": "23c111185c2ff9cc0fecd0ed361b50357e95957a",
+    "repository": "fixture/factory",
+    "repositoryId": 723
+  },
+  "blueprint": {
+    "earlyChecks": [
+      "order-offset/0"
+    ],
+    "maxCiRounds": 2,
+    "maxCiSeconds": 90,
+    "tools": {
+      "Plan": [
+        "source.read",
+        "decisions.read",
+        "cases.read",
+        "scope.plan"
+      ],
+      "Ask": [
+        "decisions.read",
+        "question.raise"
+      ],
+      "Implement": [
+        "source.read",
+        "decisions.read",
+        "cases.read",
+        "candidate.write"
+      ],
+      "Verify": [
+        "source.read",
+        "cases.read",
+        "decisions.read",
+        "checks.run"
+      ],
+      "Review": [
+        "source.read",
+        "cases.read",
+        "decisions.read",
+        "candidate.review"
+      ]
+    }
+  },
+  "repositoryLayout": {
+    "source": "fixtures/shipping/repository/shipping-rule.json",
+    "decisions": "fixtures/shipping/repository/decisions.json",
+    "cases": "fixtures/shipping/repository/acceptance.json",
+    "additionalReads": [
+      "fixtures/retail/repository/verify.cjs"
+    ],
+    "commands": [
+      [
+        "node",
+        "--check",
+        "fixtures/retail/repository/verify.cjs"
+      ],
+      [
+        "node",
+        "fixtures/retail/repository/verify.cjs"
+      ]
+    ]
+  }
+}

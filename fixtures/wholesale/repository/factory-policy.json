@@ -1,0 +1,28 @@
+{
+  "policy": {
+    "version": "wholesale/v1",
+    "requiredChecks": [
+      "order-offset/-100",
+      "order-offset/-1",
+      "order-offset/0",
+      "order-offset/1",
+      "order-offset/100"
+    ],
+    "maxRepairs": 2
+  },
+  "goal": "Correct the free shipping boundary for wholesale orders.",
+  "environment": "node:22-bookworm-slim@sha256:e9f565d32859f0cbfb52125eafe8be39390f24dac302dc3cdf566e8ba3ab21ee",
+  "script": "verify.cjs",
+  "scriptHash": "aa09fc32d01db55bb93bb1b40615567fe5622ab1cab1fdc156e048ab669a82bb",
+  "requiredRoles": [
+    "Planner",
+    "Implementer",
+    "Verifier",
+    "Reviewer"
+  ],
+  "publication": "reviewed-draft",
+  "promotion": "human",
+  "settings": {
+    "proposedThreshold": 20000
+  }
+}

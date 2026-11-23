@@ -1,0 +1,5 @@
+{
+  "version": "shipping/v1",
+  "requiredChecks": ["order-offset/-1", "order-offset/0", "order-offset/1"],
+  "maxRepairs": 1
+}

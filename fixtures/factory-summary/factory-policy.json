@@ -1,0 +1,63 @@
+{
+  "policy": {
+    "version": "factory-summary/v1",
+    "requiredChecks": [
+      "bounded-source",
+      "render-repairs"
+    ],
+    "maxRepairs": 1
+  },
+  "goal": "Show a Repairs: N line after the decision count in the factory Markdown export when a repair count is present. Preserve legacy output.",
+  "environment": "node:22-bookworm-slim@sha256:e9f565d32859f0cbfb52125eafe8be39390f24dac302dc3cdf566e8ba3ab21ee",
+  "script": "verify.cjs",
+  "scriptHash": "dee05f0aefdedd6ed693091a7f4849e50d7bc9eda1b77f0515c7160b9574824a",
+  "requiredRoles": [
+    "Planner",
+    "Implementer",
+    "Verifier",
+    "Reviewer"
+  ],
+  "publication": "reviewed-draft",
+  "promotion": "human",
+  "settings": {
+    "base": "23c111185c2ff9cc0fecd0ed361b50357e95957a",
+    "repository": "fixture/factory",
+    "repositoryId": 723
+  },
+  "blueprint": {
+    "earlyChecks": [
+      "bounded-source"
+    ],
+    "maxCiRounds": 2,
+    "maxCiSeconds": 90,
+    "tools": {
+      "Plan": [
+        "source.read",
+        "cases.read",
+        "scope.plan"
+      ],
+      "Ask": [
+        "decisions.read",
+        "question.raise"
+      ],
+      "Implement": [
+        "source.read",
+        "decisions.read",
+        "cases.read",
+        "candidate.write"
+      ],
+      "Verify": [
+        "source.read",
+        "cases.read",
+        "decisions.read",
+        "checks.run"
+      ],
+      "Review": [
+        "source.read",
+        "cases.read",
+        "decisions.read",
+        "candidate.review"
+      ]
+    }
+  }
+}

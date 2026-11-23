@@ -1,0 +1,15 @@
+bin/
+obj/
+node_modules/
+src/Factory.Api/wwwroot/dist/
+.factory/
+__pycache__/
+
+# Operator credentials and local qualification output
+.env
+.env.*
+.codex/
+auth.json
+*.sqlite*
+*.bundle
+docs/fct018-readiness.json

@@ -1,0 +1,47 @@
+services:
+  db:
+    image: postgres:16-alpine@sha256:4e6e670bb069649261c9c18031f0aded7bb249a5b6664ddec29c013a89310d50
+    environment:
+      POSTGRES_PASSWORD: ${FACTORY_DB_ADMIN:?set a distinct admin password}
+      FACTORY_DB_PASSWORD: ${FACTORY_DB_PASSWORD:?set a distinct controller password}
+      HATCHET_DB_PASSWORD: ${HATCHET_DB_PASSWORD:?set a distinct scheduler password}
+    ports:
+      - "127.0.0.1:${FACTORY_PG_PORT:-55432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./init-databases.sql:/docker-entrypoint-initdb.d/01-factory.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U postgres -d postgres"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+    logging: &bounded
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+  scheduler:
+    profiles: [dispatch]
+    image: ghcr.io/hatchet-dev/hatchet/hatchet-lite:v0.114.2@sha256:a205018e4ec2c35af4df9c86cf1e36d4b74b36ebbc849c3b33ca18815cf22d6b
+    depends_on:
+      db: { condition: service_healthy }
+    environment:
+      DATABASE_URL: postgresql://hatchet:${HATCHET_DB_PASSWORD:?use a random hex password}@db:5432/hatchet?sslmode=disable
+      SERVER_GRPC_BIND_ADDRESS: 0.0.0.0
+      SERVER_GRPC_INSECURE: "t"
+      SERVER_GRPC_BROADCAST_ADDRESS: 127.0.0.1:${FACTORY_GRPC_PORT:-57070}
+      SERVER_INTERNAL_CLIENT_INTERNAL_GRPC_BROADCAST_ADDRESS: 127.0.0.1:7070
+      SERVER_URL: http://127.0.0.1:${FACTORY_SCHEDULER_PORT:-58888}
+      SERVER_AUTH_COOKIE_INSECURE: "t"
+      SERVER_AUTH_COOKIE_DOMAIN: localhost
+      SERVER_AUTH_SET_EMAIL_VERIFIED: "t"
+      SERVER_SECURITY_CHECK_ENABLED: "false"
+      ADMIN_EMAIL: factory@example.invalid
+      ADMIN_PASSWORD: ${FACTORY_SCHEDULER_ADMIN:?set a distinct scheduler login password}
+    ports:
+      - "127.0.0.1:${FACTORY_SCHEDULER_PORT:-58888}:8888"
+      - "127.0.0.1:${FACTORY_GRPC_PORT:-57070}:7070"
+    volumes:
+      - scheduler_config:/config
+    logging: *bounded
+volumes:
+  pgdata:
+  scheduler_config:

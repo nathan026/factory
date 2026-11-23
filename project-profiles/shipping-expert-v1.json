@@ -1,0 +1,6 @@
+{
+  "version": "checkout-policy/v1",
+  "domain": "Checkout pricing and boundary semantics",
+  "documents": ["decisions.json", "acceptance.json"],
+  "maxSourceBytes": 8192
+}

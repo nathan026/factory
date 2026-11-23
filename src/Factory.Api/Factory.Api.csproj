@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+  </PropertyGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="Storage/001_dispatch.sql" LogicalName="001_dispatch.sql" />
+    <PackageReference Include="Microsoft.Data.Sqlite.Core" Version="10.0.15" />
+    <PackageReference Include="Npgsql" Version="10.0.4" />
+    <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="3.0.5" />
+    <PackageReference Include="SourceGear.sqlite3" Version="3.53.4" />
+    <Content Include="../../fixtures/retail/repository/*" Link="projects/retail/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="../../fixtures/retail/v2-policy.json" Link="projects/retail/v2-policy.json" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="../../fixtures/wholesale/repository/*" Link="projects/wholesale/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="../../fixtures/checkout-scope/factory-policy.json" Link="projects/checkout-scope/factory-policy.json" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="../../fixtures/checkout-scope/v2-policy.json" Link="projects/checkout-scope/v2-policy.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="../../fixtures/retail/repository/shipping-rule.json" Link="projects/checkout-scope/fixtures/retail/repository/shipping-rule.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <None Include="../../fixtures/shipping/repository/*.json" Link="projects/checkout-scope/fixtures/shipping/repository/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <None Include="../../fixtures/retail/repository/verify.cjs" Link="projects/checkout-scope/fixtures/retail/repository/verify.cjs" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Compile Include="../../fixtures/shipping/SampleRuntime.cs" />
+    <Compile Include="../../fixtures/factory-summary/FactorySummaryProject.cs" />
+    <Content Include="../../fixtures/factory-summary/*.json;../../fixtures/factory-summary/*.cjs;../../fixtures/self-development/task-summary.cjs;../../fixtures/self-development/policy.json;../../docs/fct020-operator-evidence.json" Link="projects/factory-summary/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="../../project-profiles/shipping-v1.json" Link="profiles/shipping-v1.json" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="../../project-profiles/shipping-expert-v1.json" Link="profiles/shipping-expert-v1.json" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="../../fixtures/shipping/repository/*.json" Link="sample/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>
