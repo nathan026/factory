@@ -17,8 +17,9 @@ internal static class IssuePickerProbe
         using var doc = JsonDocument.Parse(Console.In.ReadToEnd());
         var input = doc.RootElement;
         var approved = profile.Rules.HostedGitHub!.Issue;
+        var bindings = input.GetProperty("bindings").Deserialize<IssuePolicyBinding[]>(Wire.Json);
         var config = new GitHubProject("fixture/checkout", 723, "main", [approved], url,
-            OperatorStart: true, DeskScopeApprovals: input.GetProperty("enable").GetBoolean());
+            OperatorStart: true, DeskScopeApprovals: input.GetProperty("enable").GetBoolean(), ScopePolicies: bindings);
         using var repo = new GitHubRepository(config, project.Policy.Version, profile.Rules.RepositoryLayout);
         var sync = new GitHubSync(config, repo, store, project, profile);
         var number = input.GetProperty("number").GetInt32();

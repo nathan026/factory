@@ -49,17 +49,46 @@ class IssuePickerTest(unittest.TestCase):
                      repositoryLayout={**files,"additionalReads":[],"commands":[["node","verify.cjs"]]})
         rules["blueprint"]["earlyChecks"] = ["bounded-source"]
         (self.directory / "v1-policy.json").write_text(json.dumps(rules))
+        self.bindings = []
         self.dll = CONTRACT / "bin/Debug/net10.0/Factory.ContractTests.dll"
+
+        view = self.invoke("preview")
+        self.bindings.append({k:view[k] for k in ("issueId","issueHash","policyHash")} | {"number":5})
 
     def invoke(self, command, number=5, body=None, enable=True):
         raw = subprocess.check_output(["dotnet", self.dll, "--issue-picker", self.git.url, self.directory],
-                                     input=json.dumps(dict(command=command, number=number, body=body, enable=enable)),
+                                     input=json.dumps(dict(command=command, number=number, body=body, enable=enable, bindings=self.bindings)),
                                      text=True, timeout=18,
                                      env={**os.environ, "FACTORY_FOLLOWUP_APPROVALS":str(self.approvals)})
         return json.loads(raw)
 
     def conflict(self, *args, **kwargs):
         self.assertIn("conflict", self.invoke(*args, **kwargs))
+
+    def test_other_issue_cannot_inherit_or_start_with_copied_policy(self):
+        assigned = self.invoke("preview", 5)
+        self.git.issues[7].update(title="Reduce scrolling", body="- Keep the latest message visible.")
+        view = self.invoke("preview", 7)
+        self.assertFalse(view["assigned"])
+        self.assertEqual((view["paths"], view["checks"]), ([], []))
+        request = {k:view[k] for k in ("repositoryId","issueId","issueHash","baseSha","policyHash")}
+        draft = self.invoke("approve",7,{**request,"goal":view["title"],"paths":[],"checks":["Keep the latest message visible."]})
+        self.assertEqual(self.invoke("preview",7)["saved"], draft)
+        saved = self.invoke("approve",7,{**request,"previous":draft["id"],"goal":view["title"],
+                                         "paths":assigned["paths"],"checks":assigned["checks"]})
+        start = dict(repositoryId=view["repositoryId"], issueId=view["issueId"], scopeHash=view["issueHash"], scopeApproval=saved["id"])
+        for field, wrong in (("number",8), ("issueId",1005), ("issueHash","0"*64), ("policyHash","0"*64)):
+            binding = dict(number=7,issueId=view["issueId"],issueHash=view["issueHash"],policyHash=view["policyHash"])
+            self.bindings = [{**binding,field:wrong}]
+            self.assertFalse(self.invoke("preview",7)["canBegin"])
+            self.conflict("start",7,start)
+        self.bindings = [binding]
+        self.assertFalse(self.invoke("preview",7)["canBegin"])
+        self.conflict("start",7,start)
+        self.bindings = []
+        self.conflict("start",7,start)
+        self.assertEqual(self.invoke("tasks"), [])
+        self.assertEqual(self.git.writes, [])
 
     def test_review_approve_begin_and_poll(self):
         first = self.invoke("list", 1)

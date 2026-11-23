@@ -9,9 +9,11 @@ using System.Text.RegularExpressions;
 namespace Factory;
 
 public record ApprovedIssue(int Number, long Id, string ScopeHash, string Scenario);
+public record IssuePolicyBinding(int Number, long IssueId, string IssueHash, string PolicyHash);
 public record HostedGitHubApproval(string BaseBranch, ApprovedIssue Issue);
 public record GitHubProject(string Repository, long RepositoryId, string BaseBranch, ApprovedIssue[] Issues,
-    string ApiUrl = "https://api.github.com", bool LocalAtomicDraft = false, bool OperatorStart = false, string? IssueActionBot = null, bool DeskScopeApprovals = false)
+    string ApiUrl = "https://api.github.com", bool LocalAtomicDraft = false, bool OperatorStart = false, string? IssueActionBot = null, bool DeskScopeApprovals = false,
+    IssuePolicyBinding[]? ScopePolicies = null)
 {
     // Set only after the controller verifies the installed policy against its intake file.
     internal ApprovedIssue? HostedIssue { get; private init; }
@@ -25,6 +27,11 @@ public record GitHubProject(string Repository, long RepositoryId, string BaseBra
             || config.Issues is not { Length: > 0 } || config.Issues.Select(i => i.Number).Distinct().Count() != config.Issues.Length
             || config.Issues.Any(i => i.Id <= 0 || i.Number <= 0 || !Regex.IsMatch(i.ScopeHash, "^[0-9a-f]{64}$") || !project.Supports(i.Scenario)))
             throw new InvalidDataException("Invalid GitHub repository or issue approval.");
+        if (config.ScopePolicies is { } bindings &&
+            (bindings.Any(b => b is null || b.Number <= 0 || b.IssueId <= 0 ||
+                !Regex.IsMatch(b.IssueHash ?? "", @"\A[0-9a-f]{64}\z") || !Regex.IsMatch(b.PolicyHash ?? "", @"\A[0-9a-f]{64}\z")) ||
+             bindings.DistinctBy(b => b.Number).Count() != bindings.Length || bindings.DistinctBy(b => b.IssueId).Count() != bindings.Length))
+            throw new InvalidDataException("Invalid issue verification policy assignment.");
         var url = new Uri(config.ApiUrl);
         if (url != new Uri("https://api.github.com") && !(url.Scheme == "http" && IPAddress.TryParse(url.Host, out var ip)
             && IPAddress.IsLoopback(ip) && url.AbsolutePath == "/" && url.Query == "" && url.Fragment == "" && url.UserInfo == ""))

@@ -6,7 +6,7 @@ type IssuePage = { items: Item[]; nextPage: number | null };
 type Scope = { goal: string; paths: string[]; checks: string[] };
 type Preview = {
   repositoryId: number; issueId: number; issueHash: string; baseSha: string; policyHash: string;
-  policyGoal: string; title: string; body: string | null; paths: string[]; checks: string[]; canBegin: boolean;
+  assigned: boolean; title: string; body: string | null; paths: string[]; checks: string[]; canBegin: boolean;
   saved: {id: string; request: Scope} | null;
 };
 type Props = { api: Api; ready: boolean; created: (id:string)=>void; cancel?: ()=>void; intake: GitHubIntake; goal: string };
@@ -55,6 +55,24 @@ export function GitHubIssueForm({api,ready,created,cancel,intake,goal}: Props) {
   </section>;
 }
 
+function issueChecklist(body: string | null): string[] {
+  const checks: string[] = [];
+  let inFence = "";
+  for (const line of (body ?? "").split(/\r?\n/)) {
+    const fence = line.trimStart().match(/^(`{3,}|~{3,})/);
+    if (fence) {
+      if (!inFence) inFence = fence[1];
+      else if (fence[1].startsWith(inFence)) inFence = "";
+      continue;
+    }
+    if (inFence) continue;
+    const item = line.match(/^\s*(?:[-*+]|\d+[.)])\s+(?:\[[ xX]\]\s+)?(.+?)\s*$/);
+    if (item && item[1].length <= 2000 && !checks.includes(item[1])) checks.push(item[1]);
+    if (checks.length === 16) break;
+  }
+  return checks;
+}
+
 function IssueScope({api,ready,item,created}: {api:Api;ready:boolean;item:Item;created:(id:string)=>void}) {
   const [preview,setPreview]=useState<Preview|null>(null), [editing,edit]=useState(false), [busy,setBusy]=useState(false), [error,setError]=useState("");
   const [goal,setGoal]=useState(""), [files,setFiles]=useState(""), [tests,setTests]=useState("");
@@ -62,13 +80,13 @@ function IssueScope({api,ready,item,created}: {api:Api;ready:boolean;item:Item;c
   async function load() {
     const p=await api<Preview>(route+"/scope");
     setPreview(p); setGoal(p.saved?.request.goal ?? p.title); setFiles((p.saved?.request.paths ?? []).join("\n"));
-    setTests((p.saved?.request.checks ?? []).join("\n"));
+    setTests((p.saved?.request.checks ?? issueChecklist(p.body)).join("\n"));
     return p;
   }
   async function act(action:"review"|"save"|"start") {
     setError(""); setBusy(true);
     try {
-      if(action==="review"){const p=await load(); edit(!p.saved || !p.canBegin);}
+      if(action==="review"){const p=await load(); edit(!p.saved);}
       else if(action==="save" && preview){
         const lines=(text:string)=>text.split("\n").map(s=>s.trim()).filter(Boolean);
         await api(route+"/scope",{body:{repositoryId:preview.repositoryId,issueId:preview.issueId,issueHash:preview.issueHash,
@@ -83,21 +101,27 @@ function IssueScope({api,ready,item,created}: {api:Api;ready:boolean;item:Item;c
   }
   return <section aria-label="Issue work scope">
     {!preview ? <button disabled={!ready||busy} onClick={()=>act("review")}>Review scope</button> :
-      <><p>{preview.body}</p><p>Base revision <code>{preview.baseSha}</code></p>
+      <><details><summary>Original GitHub issue and base revision</summary>
+        <div style={{whiteSpace:"pre-wrap"}}>{preview.body}</div><p>Base revision <code>{preview.baseSha}</code></p>
+      </details>
       {editing ? <>
-        <details><summary>Installed project policy</summary><p>{preview.policyGoal}</p>
-          <ul>{[...preview.paths,...preview.checks].map(s=><li key={s}>{s}</li>)}</ul>
-          <button className="secondary" disabled={busy} onClick={()=>{setFiles(preview.paths.join("\n"));setTests(preview.checks.join("\n"));}}>Use these files and checks</button>
-        </details>
         <label>Work to complete<textarea value={goal} onChange={e=>setGoal(e.target.value)} maxLength={2000}/></label>
-        <label>Files the writer may change, one per line<textarea value={files} onChange={e=>setFiles(e.target.value)}/></label>
-        <label>Acceptance checks, one per line<textarea value={tests} onChange={e=>setTests(e.target.value)}/></label>
-        <p>Work can begin when the approved files and checks match an installed policy. You can save a different scope for policy setup.</p>
-        <button disabled={!ready||busy||!goal.trim()||!files.trim()||!tests.trim()} onClick={()=>act("save")}>Approve scope</button>
+        <label>What should work when issue #{item.number} is done? Enter one check per line.
+          <textarea rows={6} value={tests} onChange={e=>setTests(e.target.value)}/></label>
+        <details><summary>Files the writer may change</summary>
+          <label>Repository paths, one per line (optional)<textarea value={files} onChange={e=>setFiles(e.target.value)}/></label>
+        </details>
+        {preview.assigned ? <details><summary>Files and automated checks assigned to issue #{item.number}</summary>
+          <ul>{[...preview.paths,...preview.checks].map(s=><li key={s}>{s}</li>)}</ul>
+          <button className="secondary" disabled={busy} onClick={()=>{setFiles(preview.paths.join("\n"));setTests(preview.checks.join("\n"));}}>Use the assigned files and checks</button>
+        </details> : <p>You can save this checklist. Before work can start, the factory needs approved files and automated checks for issue #{item.number}.</p>}
+        <button disabled={!ready||busy||!goal.trim()||!tests.trim()} onClick={()=>act("save")}>{preview.assigned ? "Approve scope" : "Save checklist"}</button>
       </> : <>
-        <p>{goal}</p><ul>{files.split("\n").map(p=><li key={p}><code>{p}</code></li>)}</ul>
+        <h2>Saved checklist for issue #{item.number}</h2><p>{goal}</p><ul>{files.split("\n").filter(Boolean).map(p=><li key={p}><code>{p}</code></li>)}</ul>
         <ul>{tests.split("\n").map(c=><li key={c}>{c}</li>)}</ul>
-        <p role="status">{preview.canBegin ? "Scope approved. Ready to begin." : "Scope saved. The issue, base revision and installed verification policy must match before work can begin."}</p>
+        <p role="status">{preview.canBegin ? "Scope approved. Ready to begin." : preview.assigned
+          ? "Review the current issue, base revision and assigned checks before starting."
+          : `Checklist saved. Work can start after files and automated checks are assigned to issue #${item.number} and you approve the scope.`}</p>
         {preview.canBegin && <button disabled={!ready||busy} onClick={()=>act("start")}>Begin</button>}
         <button className="secondary" disabled={busy} onClick={()=>edit(true)}>Edit scope</button>
       </>}</>}
