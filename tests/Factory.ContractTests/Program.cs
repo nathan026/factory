@@ -55,6 +55,7 @@ Console.WriteLine("Passed: scoped checkout owner, pinned documents, command admi
 
 // Submit faulty worker outputs at the real controller boundary without exposing a test HTTP route.
 HostedGitHubChecks.Run();
+await GitHubAppChecks.Run();
 var fixture = new SampleRuntime();
 foreach (var fault in new[] { "foreign-run", "stale-policy", "wrong-input", "unknown-schema", "failed-status", "empty-plan", "missing-check" })
 {

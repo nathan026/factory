@@ -30,3 +30,11 @@ The public fixture history contains a synthetic task export and pinned source in
 | `fixtures` and `project-profiles` | Approved project scope, pinned source and test definitions |
 
 GitHub intake requires an explicitly approved project and issue. The included factory self-development profiles use loopback GitHub fixtures. Hosted self-development requires separate admission and qualification. Merge and deployment are operator actions.
+
+### Connect a hosted factory project
+
+Install a private GitHub App on the selected repository. The controller polls issues, so webhooks can be disabled. Grant Contents and Pull requests read/write, Issues read-only, and the default Metadata read access. New hosted projects use a deployment-installed project policy and a separate intake file with matching repository identity, branch and issue scope. GitHub permissions apply to the repository; the controller enforces the task branch, verified candidate and Draft-only publication.
+
+Set `FACTORY_GITHUB_APP_CLIENT_ID` and `FACTORY_GITHUB_APP_INSTALLATION_ID` for the trusted controller. With systemd, provide the signing key through `LoadCredential=github-app-key.pem:/absolute/protected/path/to/key.pem`. An absolute `FACTORY_GITHUB_APP_KEY_FILE` is also supported. Store the key outside the checkout and task environments. The controller needs outbound HTTPS to `api.github.com`.
+
+On demand, the controller signs a short-lived App JWT, requests a one-repository installation token and checks the returned permissions and visible repository ID. It renews before expiry and mints a fresh token after restart. A rejected repository write returns to publication reconciliation. Initial anonymous reads of a public repository are supported while the installation is being prepared. [GitHub installation authentication](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/generating-an-installation-access-token-for-a-github-app)

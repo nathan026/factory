@@ -6,6 +6,7 @@
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
   </PropertyGroup>
   <ItemGroup>
+    <InternalsVisibleTo Include="Factory.ContractTests" />
     <EmbeddedResource Include="Storage/001_dispatch.sql" LogicalName="001_dispatch.sql" />
     <PackageReference Include="Microsoft.Data.Sqlite.Core" Version="10.0.15" />
     <PackageReference Include="Npgsql" Version="10.0.4" />

@@ -64,6 +64,7 @@ public sealed class GitHubRepository : IDisposable
     private readonly GitHubProject config;
     private readonly bool subscriptionWorkers;
     private readonly RepositoryLayout? layout;
+    private readonly GitHubAppInstallation? installation;
 
     public GitHubRepository(GitHubProject config, string? policyVersion = null, RepositoryLayout? layout = null)
     {
@@ -78,16 +79,31 @@ public sealed class GitHubRepository : IDisposable
         http.DefaultRequestHeaders.UserAgent.ParseAdd("Factory-Draft-Publisher/1");
         http.DefaultRequestHeaders.Accept.ParseAdd("application/vnd.github+json");
         http.DefaultRequestHeaders.Add("X-GitHub-Api-Version", "2022-11-28");
-        if (!http.BaseAddress.IsLoopback && Environment.GetEnvironmentVariable("FACTORY_GITHUB_TOKEN") is { Length: > 0 } token)
-            http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        if (!http.BaseAddress.IsLoopback)
+        {
+            var token = Environment.GetEnvironmentVariable("FACTORY_GITHUB_TOKEN");
+            installation = GitHubAppInstallation.FromEnvironment(http, config.RepositoryId);
+            if (!string.IsNullOrEmpty(token))
+            {
+                if (installation is not null || config.HostedIssue is not null)
+                    throw new InvalidDataException("The hosted factory publisher requires its GitHub App installation.");
+                http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+            }
+        }
     }
     public void Dispose() => http.Dispose();
 
     private async Task<JsonNode?> Call(string path, object? body = null, bool allowMissing = false)
     {
         using var request = new HttpRequestMessage(body is null ? HttpMethod.Get : HttpMethod.Post, "repos/" + config.Repository + (path.Length == 0 ? "" : "/" + path));
+        if (installation is not null)
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", await installation.AccessToken());
+        else if (config.HostedIssue is not null && body is not null)
+            throw new GitHubFailure("Hosted writes require the configured GitHub App.");
         if (body is not null) request.Content = JsonContent.Create(body, options: Wire.Json);
         using var response = await http.SendAsync(request);
+        if (response.StatusCode == HttpStatusCode.Unauthorized && installation is not null)
+            await installation.Rejected(request.Headers.Authorization!.Parameter!);
         if (allowMissing && response.StatusCode == HttpStatusCode.NotFound) return null;
         if (!response.IsSuccessStatusCode) throw new GitHubFailure($"GitHub returned HTTP {(int)response.StatusCode} for {request.Method} {path}.");
         try { return JsonNode.Parse(await response.Content.ReadAsStringAsync()) ?? throw new GitHubFailure("Empty GitHub response."); }
