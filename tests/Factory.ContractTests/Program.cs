@@ -3,6 +3,12 @@ using Factory.Fixtures;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
+if (args is ["--issue-picker", var fixtureUrl, var stateDirectory])
+{
+    await IssuePickerProbe.Run(fixtureUrl, stateDirectory);
+    return;
+}
+
 // Exercise only the Git object builder against a local transport. This cannot create refs or Drafts.
 if (args is ["--check-scoped-tree", var localUrl])
 {
