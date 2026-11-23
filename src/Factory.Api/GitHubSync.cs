@@ -31,7 +31,8 @@ public sealed class GitHubSync(GitHubProject config, GitHubRepository repo, Task
 
         if (automatic && store.PublicationHeld(taskId)) return status;
         try { return await Publish(status, approval, taskId); }
-        catch (UnknownPublication ex) when (status.Origin?.LocalJournal is null && new Uri(config.ApiUrl).IsLoopback)
+        catch (UnknownPublication ex) when (status.Origin is { LocalJournal: null } &&
+            (new Uri(config.ApiUrl).IsLoopback || config.HostedIssue is not null))
         {
             store.HoldPublication(taskId, ex.Message);
             store.PublicationProblem(taskId, ex.Message);
