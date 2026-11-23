@@ -13,7 +13,7 @@ public sealed partial class TaskStore
         if (ciProfile?.Rules.HostedGitHub is null || task.Phase!=Phase.Implementation || task.Activity!=Activity.Blocked ||
             task.Candidate is not null || task.Receipts.Count!=0 || task.Repairs!=0 || task.Run is not null || task.FollowUp is null ||
             status.TaskId!=taskId || status.Origin is not { } origin || origin.PolicyHash!=ciProfile.Hash || origin.LocalJournal is not null ||
-            task.Source.Fingerprint()!=origin.SourceHash || hold is not { Kind:"Outcome unknown", RetainedOutputHash:null } ||
+            task.Source.Fingerprint()!=origin.SourceHash || hold is not { Kind: "Outcome unknown" or "Coding timeout", RetainedOutputHash:null } ||
             task.Gates[^1].Input.RunId is not { } run || hold.OperationId!=$"{run:N}.Implement" ||
             !CodexEvidence.ReleasedInterruptedWriter(taskId,run,ciProfile.Hash,origin.SourceHash) ||
             s.Text("SELECT task_id FROM github_publications WHERE task_id=@id",("id",taskId.ToString())) is not null ||

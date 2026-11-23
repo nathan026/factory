@@ -3,9 +3,9 @@ using System.Text.Json;
 namespace Factory;
 
 public record DispatchTicket(bool Advanced, string? Id = null, string? SchedulerId = null);
-public record DispatchClaim(string Token, WorkOrder Order, string WorkerMode);
+public record DispatchClaim(string Token, WorkOrder Order, string WorkerMode, int? CodingSeconds = null);
 
-public sealed partial class TaskStore(FactoryDatabase database, Lifecycle lifecycle, Func<IControlledProject> newFixtureSession, int stallSeconds = 120, CiProfile? ciProfile = null, FundingProfile? funding = null, bool liveOwner = false, CiProfile? previousProfile = null)
+public sealed partial class TaskStore(FactoryDatabase database, Lifecycle lifecycle, Func<IControlledProject> newFixtureSession, int stallSeconds = 120, CiProfile? ciProfile = null, FundingProfile? funding = null, bool liveOwner = false, CiProfile? previousProfile = null, int codingSeconds = 60)
 {
     public List<WorkItem> List()
     {
@@ -230,10 +230,16 @@ public sealed partial class TaskStore(FactoryDatabase database, Lifecycle lifecy
         else if (lifecycle.Prepare(task) is not { } active || !MatchesIntent(task, active, Encode(active), request)) return null;
         if (ci && !CheckCiBudget(s, task, order)) return null;
         Bind(s, id, schedulerId);
+        int? coding = !ci && RequiresSubscription(order) && (order.Action is WorkAction.Implement or WorkAction.Review)
+            ? codingSeconds : null;
+        // The model and its workspace stop inside the coding window. Leave time for the
+        // dispatcher to deliver the terminal result before the controller fences the claim.
+        int receiptSeconds = coding.HasValue ? Math.Max(120, coding.Value + 15)
+            : ci ? ciProfile!.Rules.Blueprint?.MaxCiSeconds ?? 120 : 120;
         var token = Guid.NewGuid().ToString("N");
         int inserted = s.Execute("""
             INSERT INTO dispatch_inbox(id,claim,deadline) VALUES(@id,@claim,@deadline) ON CONFLICT(id) DO NOTHING
-            """, ("id", id), ("claim", token), ("deadline", DateTimeOffset.UtcNow.AddSeconds(ci ? ciProfile!.Rules.Blueprint?.MaxCiSeconds ?? 120 : 120).ToUnixTimeSeconds()));
+            """, ("id", id), ("claim", token), ("deadline", DateTimeOffset.UtcNow.AddSeconds(receiptSeconds).ToUnixTimeSeconds()));
         if (inserted == 0) return null;
         if (sessionId is null || sessionId == Guid.Empty) throw new CommandConflict("A fresh execution session is required.");
         if (s.Execute("""
@@ -241,8 +247,8 @@ public sealed partial class TaskStore(FactoryDatabase database, Lifecycle lifecy
             ON CONFLICT(session_id) DO NOTHING
             """, ("id", id), ("session", sessionId.Value.ToString())) == 0)
             throw new CommandConflict("Execution session already belongs to another operation.");
-        AdvanceDeadline(s, id);
-        return new(token, order, ci ? "ci" : RequiresSubscription(order) ? "codex-subscription" : "controlled");
+        AdvanceDeadline(s, id, coding is > 60 ? Math.Max(stallSeconds, receiptSeconds) : stallSeconds);
+        return new(token, order, ci ? "ci" : RequiresSubscription(order) ? "codex-subscription" : "controlled", coding);
     }
 
     private bool RequiresSubscription(WorkOrder order) => order.Action is WorkAction.Discuss or WorkAction.AnswerWorker || order.ExpertRuntime == "codex-subscription"

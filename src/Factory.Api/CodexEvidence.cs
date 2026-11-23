@@ -19,7 +19,7 @@ internal static class CodexEvidence
             using var cmd = db.CreateCommand();
             cmd.CommandText = """
                 SELECT 1 FROM codex_attempts a JOIN leases l ON a.generation=l.generation AND a.task=l.task AND a.run=l.run
-                WHERE a.task=$task AND a.run=$run AND a.action='Implement' AND a.status='interrupted'
+                WHERE a.task=$task AND a.run=$run AND a.action='Implement' AND a.status IN ('interrupted','Coding timeout')
                 AND a.ended IS NOT NULL AND a.result IS NULL AND a.policy=$policy AND a.source=$source
                 AND l.role='writer' AND l.operation=a.action AND l.policy=a.policy AND l.state='released' AND l.outcome_hash IS NULL
                 AND NOT EXISTS (SELECT 1 FROM leases WHERE task=$task AND state<>'released')

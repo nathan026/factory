@@ -129,7 +129,7 @@ class Leases:
             raise RuntimeError("Lease resource ownership mismatch. Cleanup is quarantined.")
         return info
 
-    def acquire(self, task, run, role, operation, policy, files, image=IMAGE, ttl=90):
+    def acquire(self, task, run, role, operation, policy, files, image=IMAGE, ttl=90, expires_by=None):
         if image != IMAGE or role not in {"writer", "reviewer", "verifier", "expert", "owner"} or not 2 <= ttl <= 300:
             raise ValueError("Unsupported environment template, role or lifetime")
         if not operation or not policy or not files or len(files) > 16:
@@ -159,10 +159,15 @@ class Leases:
                                       "--filter","label="+LABEL+".role=writer")):
                     raise RuntimeError("An earlier writer still exists on this engine.")
                 name = "factory-writer-" + task
+            now = int(time.time())
+            if expires_by is not None:
+                ttl = min(ttl, int(expires_by) - now)
+                if ttl < 2:
+                    raise RuntimeError("Coding lease expired before reservation")
             try:
                 db.execute("""INSERT INTO leases(generation,task,run,role,operation,policy,image,files,expires,state,container_name)
                     VALUES(?,?,?,?,?,?,?,?,?,'reserved',?)""",
-                    (generation, task, run, role, operation, policy, image, hashes, int(time.time()) + ttl, name))
+                    (generation, task, run, role, operation, policy, image, hashes, now + ttl, name))
             except sqlite3.IntegrityError as err:
                 raise RuntimeError("Operation already leased or earlier writer requires retirement") from err
         try:

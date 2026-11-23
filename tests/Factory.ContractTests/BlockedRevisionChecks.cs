@@ -26,7 +26,7 @@ internal static class BlockedRevisionChecks
         {
             var task = new Lifecycle(previous,old).Start(Guid.NewGuid(),previous.Scenarios.Single().Id);
             var origin = SeedFailure(db,task,old);
-            TaskStore Open() => new(db,new Lifecycle(project,ci),()=>project,ciProfile:ci,previousProfile:old);
+            TaskStore Open() => new(db,new Lifecycle(project,ci),()=>project,ciProfile:ci,previousProfile:old,codingSeconds:300);
             var store = Open();
             store.BindProject(ci.Hash);
             var (_,checkpoint) = store.InspectRevision(task.Id);
@@ -58,7 +58,7 @@ internal static class BlockedRevisionChecks
             var archived = JsonSerializer.Deserialize<WorkItem>(archive!,Wire.Json)!;
             if (GateInput.Hash(archived.Receipts) != GateInput.Hash(task.Receipts) || archived.Candidate != task.Candidate)
                 throw new Exception("The failed candidate or evidence was lost.");
-            CheckDispatch(store,project,command,nextOrigin,directory);
+            CheckDispatch(store,project,command,nextOrigin,directory,db);
             Console.WriteLine("Passed: blocked verification holds until approval, rejects stale inputs, preserves the failed round and admits the new paths after restart");
         }
         finally
@@ -68,7 +68,7 @@ internal static class BlockedRevisionChecks
         }
     }
 
-    private static void CheckDispatch(TaskStore store, HostedRepositoryProject project, RevisionCommand approval, IssueOrigin origin, string directory)
+    private static void CheckDispatch(TaskStore store, HostedRepositoryProject project, RevisionCommand approval, IssueOrigin origin, string directory, FactoryDatabase db)
     {
         List<WorkAction> actions = [];
         for (int i = 0; i < 12; i++)
@@ -78,6 +78,8 @@ internal static class BlockedRevisionChecks
             store.Submitted(id,scheduler);
             var claim = store.Claim(id,scheduler,Guid.NewGuid()) ?? throw new Exception("Fresh worker was denied.");
             var order = claim.Order;
+            if (order.Action != WorkAction.Implement && claim.CodingSeconds is not null)
+                throw new Exception("A non-coding claim received the coding allowance.");
             actions.Add(order.Action);
             order.Validate(project);
             if (order.Action == WorkAction.Implement)
@@ -88,7 +90,16 @@ internal static class BlockedRevisionChecks
                     order.Context.FollowUp.PolicyHash != approval.PolicyHash ||
                     !paths.ToHashSet().SetEquals(project.Ci.Rules.RepositoryLayout!.Writable))
                     throw new Exception("Writer did not receive the approved base, policy and two-file scope.");
-                if (!store.Failed(id,scheduler)) throw new Exception("Expected the writer to park.");
+                var deadline = db.Read(s => long.Parse(s.Text("SELECT CAST(deadline AS TEXT) FROM dispatch_inbox WHERE id=@id",("id",id))!));
+                var watch = db.Read(s => long.Parse(s.Text("SELECT CAST(deadline AS TEXT) FROM dispatch_watch WHERE id=@id",("id",id))!));
+                var now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+                if (claim.CodingSeconds != 300 || deadline < now+300 || deadline > now+315 || watch < now+300 || watch > now+315)
+                    throw new Exception("Controller result and stall deadlines cannot cover the approved coding window.");
+                var timeout = new RuntimeWait(claim.Token, "Coding timeout", "Subscription");
+                if (!store.ParkRuntime(id,timeout) || !store.ParkRuntime(id,timeout) ||
+                    store.List().Single().Activity != Activity.Blocked || store.Claim(id,scheduler,Guid.NewGuid()) is not null ||
+                    db.Read(s => s.Text("SELECT id FROM subscription_waits WHERE id=@id",("id",id))) is not null)
+                    throw new Exception("Coding timeout must fence its run and remain distinct from an allowance wait.");
                 CheckWriterRecovery(store,order,origin,directory);
                 return;
             }
@@ -112,7 +123,7 @@ internal static class BlockedRevisionChecks
             sql.CommandText="""
                 CREATE TABLE codex_attempts(task,run,generation,action,status,ended,result,policy,source);
                 CREATE TABLE leases(task,run,generation,role,operation,state,policy,outcome_hash);
-                INSERT INTO codex_attempts VALUES($task,$run,'g','Implement','interrupted',1,NULL,$policy,$source);
+                INSERT INTO codex_attempts VALUES($task,$run,'g','Implement','Coding timeout',1,NULL,$policy,$source);
                 INSERT INTO leases VALUES($task,$run,'g','writer','Implement','active',$policy,NULL);
                 """;
             sql.Parameters.AddWithValue("$task",taskId.ToString());

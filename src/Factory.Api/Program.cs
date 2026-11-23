@@ -114,8 +114,11 @@ if (ownerRuntime is not null && (ownerRuntime != "codex-subscription" || !hatche
     throw new InvalidOperationException("Subscription owner discussion requires Hatchet and a shared lease journal.");
 var previousProfile = project.Ci?.Rules.Revision is { } revision ? LoadProject(revision.PreviousVersion).Ci : null;
 if (previousProfile?.Hash != project.Ci?.Rules.Revision?.PreviousHash) throw new InvalidDataException("Previous policy differs from the installed revision approval.");
+var codingBudget = Environment.GetEnvironmentVariable("FACTORY_CODING_SECONDS") ?? "60";
+if (!int.TryParse(codingBudget, out var codingSeconds) || codingSeconds is < 60 or > 300)
+    throw new InvalidOperationException("FACTORY_CODING_SECONDS must be between 60 and 300.");
 var store = new TaskStore(new FactoryDatabase(directory, postgres), new Lifecycle(project, project.Ci, expertRuntime, ownerRuntime),
-    () => LoadProject(project.Policy.Version), stallSeconds, project.Ci, fundingProfile, ownerRuntime is not null, previousProfile);
+    () => LoadProject(project.Policy.Version), stallSeconds, project.Ci, fundingProfile, ownerRuntime is not null, previousProfile, codingSeconds);
 store.BindProject(project.Ci?.Hash ?? "shipping/v1");
 var checkpoint = store.LatestRestore();
 var restorePaused = checkpoint is { ReleasedUtc: null };

@@ -98,6 +98,18 @@ class EnvironmentTest(unittest.TestCase):
             self.leases.finish(writer,{"late":True})
         self.leases.release(writer)
 
+    def test_coding_lease_stops_at_original_dispatch_deadline(self):
+        task, run = str(uuid4()), str(uuid4())
+        hard_end = int(time.time()) + 120
+        args = (task,run,"writer","Implement","example",{"desk.css":"body {}"})
+        generation = self.leases.acquire(*args,ttl=300,expires_by=hard_end)
+        try:
+            self.assertEqual(self.leases.record(generation)["expires"],hard_end)
+        finally:
+            self.leases.release(generation)
+        with self.assertRaisesRegex(RuntimeError,"expired before reservation"):
+            self.leases.acquire(task,str(uuid4()),*args[2:],ttl=300,expires_by=time.time()-1)
+
     def test_startup_inspect_timeout_retires_only_its_container(self):
         from unittest.mock import patch
         sibling = self.lease("reviewer",{"sibling":"keep"}, str(uuid4()))

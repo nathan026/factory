@@ -76,7 +76,7 @@ public sealed partial class TaskStore
             summary = DeliverySummary.From(task, memory.Documents.First(d => d.Part == SourcePart.Source).Path,
                 ProfileFor(task)?.Rules.RepositoryLayout, repository is not null),
             revisionAvailable = previousProfile is not null && task.Policy?.Version == previousProfile.Rules.Policy.Version && task.Activity == Activity.Blocked && task.Phase == Phase.Verification,
-            writerRestart = repository is not null && recovery?.Kind == "Outcome unknown" && task.Phase == Phase.Implementation &&
+            writerRestart = repository is not null && (recovery?.Kind is "Outcome unknown" or "Coding timeout") && task.Phase == Phase.Implementation &&
                 task.Candidate is null && task.Repairs == 0 && task.FollowUp is not null && ciProfile?.Rules.HostedGitHub is not null &&
                 task.Gates.LastOrDefault()?.Input.RunId is { } writer && CodexEvidence.ReleasedInterruptedWriter(id,writer,ciProfile.Hash,task.Source.Fingerprint()),
             issueAction, previousDrafts,
