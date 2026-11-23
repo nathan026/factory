@@ -102,6 +102,8 @@ public sealed partial class GitHubSync
         {
             baseSha = await repo.BaseHead(),
             path = round.Origin.Path,
+            paths = ci?.Rules.RepositoryLayout?.Writable ?? [round.Origin.Path],
+            criteria = ci?.Rules.Revision?.Criteria,
             merged = pr.Merged,
             open = pr.Open,
             summary = store.PreviewFinish(round),

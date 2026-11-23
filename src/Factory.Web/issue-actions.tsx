@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import type { Api, IssueAction, Workspace } from "./types";
 
-type Preview = { summary: string; baseSha: string; path: string; merged: boolean; open: boolean; targetBranch: string; state: IssueAction | null };
+type Preview = { summary: string; baseSha: string; path: string; paths?: string[]; criteria?: { id: string; text: string }[]; merged: boolean; open: boolean; targetBranch: string; state: IssueAction | null };
 
 export function IssueActions({task, api, ready, update}: {task: Workspace; api: Api; ready: boolean; update: () => void}) {
   const repo = task.repository!;
@@ -41,7 +41,10 @@ export function IssueActions({task, api, ready, update}: {task: Workspace; api: 
         {!preview.state && task.messages.length>0 && <button onClick={()=>setScope(task.messages[task.messages.length-1].text.slice(0,2000))}>Use last desk message</button>}
         <label>Approved follow-up scope<textarea maxLength={2000} readOnly={!!preview.state} value={scope} onChange={e=>setScope(e.target.value)} /></label>
         <p>The factory will post this request on issue #{repo.number} and start a new round on this task.</p>
-        <p>Approved file: <code>{preview.path}</code>. Base: {preview.targetBranch} at <code>{preview.state?.baseSha ?? preview.baseSha}</code>.</p>
+        <p>Approved files</p>
+        <ul>{(preview.paths ?? [preview.path]).map(path=><li key={path}><code>{path}</code></li>)}</ul>
+        {preview.criteria && <><p>Acceptance checks</p><ul>{preview.criteria.map(c=><li key={c.id}>{c.text}</li>)}</ul></>}
+        <p>Start from {preview.targetBranch} at <code>{preview.state?.baseSha ?? preview.baseSha}</code>.</p>
         {!preview.merged && (repo.baseSha===preview.baseSha
           ? <p>The previous PR stays open. The new round starts with its saved changes.</p>
           : <p>The base has changed. This round starts from the displayed base. Include any work you still need from the earlier PR in your request.</p>)}
