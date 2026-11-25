@@ -72,6 +72,34 @@ try {
       assert.ok(await summary.isVisible());
       assert.ok(await link.isVisible());
     }
+    await delivery.getByText("Issue closed.", { exact: false }).waitFor();
+    assert.equal(await delivery.getByRole("button", { name: "Request follow-up" }).count(), 0);
+    assert.equal(await delivery.getByRole("button", { name: "Finish issue" }).count(), 0);
+    if (visit) continue;
+
+    await page.getByRole("button", { name: "Conversation", exact: true }).click();
+    const composer = page.getByLabel("Message the lifecycle owner");
+    const message = "First line\nSecond line";
+    const reply = "Browser test acknowledgement.";
+    let submissions = 0;
+    await context.route("**/api/tasks/*/messages", async route => {
+      submissions++;
+      const { id, text } = route.request().postDataJSON();
+      assert.equal(route.request().method(), "POST");
+      assert.equal(text, message);
+      await route.fulfill({ json: { id, text, reply } });
+    });
+    await composer.fill("First line");
+    await composer.press("End");
+    await composer.press("Enter");
+    await page.keyboard.type("Second line");
+    assert.equal(await composer.inputValue(), message);
+    assert.equal(submissions, 0);
+    await composer.press("Control+Enter");
+    await page.getByRole("region", { name: "Latest owner reply" }).getByText(reply).waitFor();
+    assert.equal(await composer.inputValue(), "");
+    assert.equal(submissions, 1);
+    assert.equal(page.url(), taskUrl);
   }
 } finally {
   await browser.close();
