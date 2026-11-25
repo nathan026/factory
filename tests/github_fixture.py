@@ -29,6 +29,7 @@ class GitHubFixture:
         self.writes = []
         self.comments = []
         self.protected = set()
+        self.linked_pulls = {}
         self.drop_comment = self.drop_close = False
         self.drop_pr = False
         self.drop_ref = False
@@ -185,10 +186,20 @@ class GitHubFixture:
 
     def respond(self, method, path, query, obj):
         if path == "graphql" and method == "POST":
+            if "closedByPullRequestsReferences" in obj["query"]:
+                assert "includeClosedPrs:true" in obj["query"]
+                variables=obj["variables"]
+                number=variables["number"]
+                links=self.linked_pulls.get(number, [])
+                index=int(variables.get("after") or 0)
+                end=index+2
+                return 200, {"data":{"repository":{"issue":{"fullDatabaseId":str(self.issues[number]["id"]),
+                    "closedByPullRequestsReferences":{"nodes":links[index:end],
+                    "pageInfo":{"hasNextPage":end<len(links),"endCursor":str(end)}}}}}}
             mutation = obj["variables"]["input"]
             change, = mutation["refUpdates"]
             assert "updateRefs" in obj["query"] and mutation["repositoryId"] == "fixture-node"
-            assert change["afterOid"] == "0"*40 and change["name"].startswith("refs/heads/factory/")
+            assert change["afterOid"] == "0"*40 and change["name"].startswith("refs/heads/") and change["name"] != "refs/heads/main"
             self.git("update-ref", "-d", change["name"], change["beforeOid"])
             self.writes.append("delete-ref")
             return 200, {"data":{"updateRefs":{"clientMutationId":None}}}
@@ -249,7 +260,7 @@ class GitHubFixture:
             if path.startswith("branches/"):
                 return 200, {"protected":path.removeprefix("branches/") in self.protected}
             if path == "pulls" and query["state"] == ["open"]:
-                return 200, [p for p in self.pulls if p["state"] == "open" and query["head"] == ["fixture:"+p["head"]["ref"]]]
+                return 200, [p for p in self.pulls if p["state"] == "open" and ("head" in query and query["head"] == ["fixture:"+p["head"]["ref"]] or query.get("base") == [p["base"]["ref"]])]
             if path == "pulls":
                 assert query["state"] == ["all"]
                 return 200, [] if self.hide_pulls else [p for p in self.pulls if query["head"] == ["fixture:"+p["head"]["ref"]]

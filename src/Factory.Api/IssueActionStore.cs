@@ -2,7 +2,7 @@ using System.Text.Json;
 
 namespace Factory;
 
-public record IssueActionCommand(Guid TaskId, string HeadSha, string BaseSha, string Scope, Guid? ActionId = null);
+public record IssueActionCommand(Guid TaskId, string HeadSha, string BaseSha, string Scope, Guid? ActionId = null, string? CleanupHash = null);
 public record IssueActionState(Guid Id, string Kind, string Stage, string Scope, string HeadSha, string BaseSha, string? CommentId);
 public record DeliveredRound(IssueOrigin Origin, DraftIntent Intent, DraftReceipt Draft, bool OwnsBranch);
 internal record IssueActionRecord(IssueActionState State, string Body, DeliveredRound Delivery);
@@ -59,7 +59,7 @@ public sealed partial class TaskStore
     internal string PreviewFinish(DeliveredRound round) => database.Read(s =>
         FinishSummary(s, ReadTask(s, round.Intent.TaskId), round));
 
-    internal IssueActionRecord ReserveIssueAction(DeliveredRound round, IssueActionCommand command, string kind) => database.Write(s =>
+    internal IssueActionRecord ReserveIssueAction(DeliveredRound round, IssueActionCommand command, string kind, CleanupEntry[]? plan = null) => database.Write(s =>
     {
         var task = ReadTask(s, command.TaskId);
         if (task.Activity != Activity.Delivered || RepositoryDelivery(s, task.Id)?.Draft != round.Draft)
@@ -75,11 +75,22 @@ public sealed partial class TaskStore
             ON CONFLICT DO NOTHING
             """, ("task", task.Id.ToString()), ("head", round.Draft.HeadSha), ("id", id.ToString()), ("owns", round.OwnsBranch ? 1 : 0), ("kind", kind), ("scope", command.Scope),
             ("base", command.BaseSha), ("body", body + "\n\n" + marker), ("doc", Encode(task)), ("intent", Encode(round.Intent)), ("origin", Encode(round.Origin)), ("draft", Encode(round.Draft)));
+        if (plan is not null && s.Text("SELECT id FROM github_issue_actions WHERE id=@id",("id",id.ToString())) is not null)
+            s.Execute("INSERT INTO github_cleanup_plans(action_id,document) VALUES(@id,@doc)",("id",id.ToString()),("doc",Encode(plan)));
         var action = ActionFor(s, task.Id, command.HeadSha)!;
+        if (command.CleanupHash != PlanHash(ReadCleanupPlan(s,action.State.Id)))
+            throw new CommandConflict("Branch approval changed. Reopen Finish issue.");
         if (action.State.Kind != kind || action.State.Scope != command.Scope || action.State.BaseSha != command.BaseSha)
             throw new CommandConflict("A different operator action already covers this delivery.");
         return action;
     });
+
+    private static CleanupEntry[]? ReadCleanupPlan(Session s,Guid action) =>
+        s.Text("SELECT document FROM github_cleanup_plans WHERE action_id=@id",("id",action.ToString())) is { } raw
+            ? JsonSerializer.Deserialize<CleanupEntry[]>(raw,Wire.Json) : null;
+
+    internal CleanupEntry[]? CleanupPlanFor(Guid action) => database.Read(s=>ReadCleanupPlan(s,action));
+    internal static string? PlanHash(CleanupEntry[]? plan) => plan is null ? null : GateInput.Hash(plan);
 
     private string FinishSummary(Session s, WorkItem current, DeliveredRound round)
     {

@@ -210,8 +210,8 @@ if (github is not null)
     app.MapPost("/api/github/issues/{number:int}/writer-recovery", (int number, WriterRestart command) => github.RestartWriter(number,command));
     app.MapGet("/api/github/issues/{number:int}/revision", (int number, Guid taskId) => github.PreviewRevision(number,taskId));
     app.MapPost("/api/github/issues/{number:int}/revision", (int number, RevisionCommand command) => github.ResumeRevision(number,command));
-    app.MapGet("/api/github/issues/{number:int}/actions", (int number, Guid taskId, string headSha) =>
-        github.IssueActionPreview(number,taskId,headSha));
+    app.MapGet("/api/github/issues/{number:int}/actions", (int number, Guid taskId, string headSha, bool? finish) =>
+        github.IssueActionPreview(number,taskId,headSha,finish == true));
     app.MapPost("/api/github/issues/{number:int}/actions/{kind}", (int number,string kind,IssueActionCommand command) =>
         github.RunIssueAction(number,kind,command));
     app.MapPost("/api/github/issues/{number:int}/sync", (int number) => github.Poll(number));
