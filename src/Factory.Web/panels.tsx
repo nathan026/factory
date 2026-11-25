@@ -99,11 +99,16 @@ export function Conversation({
           maxLength={4000}
           disabled={busy}
           onChange={(e) => edit(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key !== "Enter" || !e.ctrlKey || e.nativeEvent.isComposing) return;
+            e.preventDefault();
+            if (!e.repeat) e.currentTarget.form?.requestSubmit();
+          }}
           rows={2}
         />
         <div className="composer-foot">
-          <small>Discussion is saved to this task.</small>
-          <button disabled={!ready || busy || !draft.trim()}>{busy ? "Sending…" : "Send message"}</button>
+          <small>Discussion is saved to this task. Ctrl+Enter sends the message.</small>
+          <button aria-keyshortcuts="Control+Enter" disabled={!ready || busy || !draft.trim()}>{busy ? "Sending…" : "Send message"}</button>
         </div>
         {error && <p role="alert">{error}</p>}
       </form>
