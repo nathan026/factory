@@ -52,12 +52,19 @@ public sealed partial class GitHubRepository
         if (!Regex.IsMatch(branch, @"\A" + Regex.Escape(prefix) + @"(?:-[a-f0-9]{32})?\z") || branch == config.BaseBranch)
             throw new CommandConflict("Unexpected task branch.");
         if (!round.OwnsBranch) return $"Kept {branch} because the factory did not record creating it.";
+        if (!(await PullState(round)).Merged) return $"Kept {branch} because its PR is unmerged.";
+        return await DeleteApprovedBranch(new(branch, round.Draft.Number, round.Draft.HeadSha), reserve);
+    }
+
+    private async Task<string?> KeepBranch(BranchTarget target)
+    {
+        var branch = target.Branch;
+        if (branch == config.BaseBranch) return $"Kept {branch} because it is the project base.";
         var current = await Ref(branch);
         if (current is null) return $"{branch} was already absent.";
-        if (current != round.Draft.HeadSha) return $"Kept {branch} because its head changed.";
-        if (!(await PullState(round)).Merged) return $"Kept {branch} because its PR is unmerged.";
+        if (current != target.HeadSha) return $"Kept {branch} because its head changed.";
         var repo = (await Call(""))!;
-        if ((long?)repo["id"] != config.RepositoryId || (string?)repo["node_id"] is not { Length: > 0 } node)
+        if ((long?)repo["id"] != config.RepositoryId || (string?)repo["default_branch"] is not { Length: > 0 })
             throw new GitHubFailure("Cannot confirm the repository node.");
         if ((string?)repo["default_branch"] == branch) return $"Kept {branch} because it is the default branch.";
         var info = (await Call("branches/" + Uri.EscapeDataString(branch), allowMissing: true));
@@ -65,8 +72,19 @@ public sealed partial class GitHubRepository
         if ((bool?)info["protected"] != false) return $"Kept {branch} because GitHub protects it.";
         var owner = config.Repository.Split('/')[0];
         var open = await Call($"pulls?state=open&head={Uri.EscapeDataString(owner + ":" + branch)}&per_page=1");
-        if (open!.AsArray().Count > 0) return $"Kept {branch} because an open PR uses it.";
-        if (!reserve()) return $"Removal of {branch} was already requested. Inspect its ref on GitHub.";
+        var bases = await Call($"pulls?state=open&base={Uri.EscapeDataString(branch)}&per_page=1");
+        if (open!.AsArray().Count > 0 || bases!.AsArray().Count > 0) return $"Kept {branch} because an open PR uses it.";
+        return null;
+    }
+
+    internal async Task<string> DeleteApprovedBranch(BranchTarget target, Func<bool> reserve)
+    {
+        var branch = target.Branch;
+        if (await KeepBranch(target) is { } reason) return reason;
+        var repository = (await Call(""))!;
+        if ((long?)repository["id"] != config.RepositoryId || (string?)repository["node_id"] is not {Length: >0} node)
+            throw new GitHubFailure("Cannot confirm the repository node.");
+        if (!reserve()) throw new CommandConflict($"Removal of {branch} is unconfirmed. Check the original request before retrying.");
         const string query = "mutation($input:UpdateRefsInput!){updateRefs(input:$input){clientMutationId}}";
         var response = (await Call("", new
         {
@@ -76,7 +94,7 @@ public sealed partial class GitHubRepository
                 input = new
                 {
                     repositoryId = node,
-                    refUpdates = new[] { new { name = "refs/heads/" + branch, beforeOid = current, afterOid = new string('0', 40) } }
+                    refUpdates = new[] { new { name = "refs/heads/" + branch, beforeOid = target.HeadSha, afterOid = new string('0', 40) } }
                 }
             }
         }, graphql: true))!;
@@ -90,7 +108,7 @@ public sealed partial class GitHubSync
 {
     public bool IssueActionsEnabled => config.IssueActionBot is not null;
 
-    public async Task<object> IssueActionPreview(int number, Guid taskId, string headSha)
+    public async Task<object> IssueActionPreview(int number, Guid taskId, string headSha, bool finish)
     {
         var approval = Approval(number);
         if (config.IssueActionBot is null) throw new CommandConflict("Issue writes are disabled for this repository.");
@@ -98,6 +116,9 @@ public sealed partial class GitHubSync
         var issue = await repo.Issue(number);
         if ((long?)issue["id"] != approval.Id || issue["pull_request"] is not null) throw new CommandConflict("Issue identity changed.");
         var pr = await repo.PullState(round);
+        var action = store.ActionFor(taskId,headSha);
+        var plan = action is not null ? store.CleanupPlanFor(action.State.Id) :
+            finish && pr.Merged ? await repo.CleanupPlan(approval,store.PriorRounds(taskId).Append(round)) : null;
         return new
         {
             baseSha = await repo.BaseHead(),
@@ -108,7 +129,7 @@ public sealed partial class GitHubSync
             open = pr.Open,
             summary = store.PreviewFinish(round),
             targetBranch = config.BaseBranch,
-            state = store.ActionFor(taskId, headSha)?.State
+            state = action?.State, branches = plan, cleanupHash = TaskStore.PlanHash(plan)
         };
     }
 
@@ -162,7 +183,13 @@ public sealed partial class GitHubSync
         if (round.Origin.PolicyHash != ci?.Hash || round.Origin.ApiUrl != config.ApiUrl || round.Origin.Repository != config.Repository ||
             round.Origin.Base != config.BaseBranch || round.Origin.ScopeHash != approval.ScopeHash || round.Origin.IssueId != approval.Id)
             throw new CommandConflict("The repository or installed policy differs from the recorded delivery.");
-        action ??= store.ReserveIssueAction(round, command, kind);
+        var deliveries = store.PriorRounds(command.TaskId).Append(round).ToArray();
+        var plan = action is null ? null : store.CleanupPlanFor(action.State.Id);
+        if (action is null && command.CleanupHash is not null && kind == "finish")
+            plan = await repo.CleanupPlan(approval,deliveries);
+        if (TaskStore.PlanHash(plan) != command.CleanupHash)
+            throw new CommandConflict("The branches changed. Reopen Finish issue to review the current branches.");
+        action ??= store.ReserveIssueAction(round, command, kind, plan);
         var a = action.State;
         IssueActionState Current() => store.ActionFor(command.TaskId, command.HeadSha)?.State is { } current && current.Id == a.Id
             ? current : throw new CommandConflict("The pending action was replaced or withdrawn.");
@@ -205,7 +232,24 @@ public sealed partial class GitHubSync
             if (Current().Stage == "closed")
             {
                 var branches = new List<string>();
-                foreach (var delivery in store.PriorRounds(command.TaskId).Append(round))
+                if (plan is not null)
+                {
+                    var current = await repo.CleanupPlan(approval,deliveries);
+                    foreach (var entry in plan)
+                    {
+                        var target = entry.Target;
+                        var result = store.CleanupResult(a.Id,target.Branch);
+                        if (result is null)
+                        {
+                            var match = current.FirstOrDefault(c=>c.Target==target);
+                            result = entry.Keep ?? (match is null ? $"Skipped {target.Branch}. The approved pull request or branch changed."
+                                : match.Keep ?? await repo.DeleteApprovedBranch(target,()=>store.ReserveBranchCleanup(a.Id,target.Branch)));
+                            store.RecordCleanup(a.Id,target.Branch,result);
+                        }
+                        branches.Add(result);
+                    }
+                }
+                else foreach (var delivery in deliveries)
                 {
                     var branch = delivery.Intent.Branch;
                     var outcome = store.CleanupResult(a.Id, branch);

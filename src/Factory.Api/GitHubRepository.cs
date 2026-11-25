@@ -173,7 +173,7 @@ public sealed partial class GitHubRepository : IDisposable
         && Regex.IsMatch(sha, "^[0-9a-f]{40}$") ? sha : throw new GitHubFailure("Invalid Git object ID.");
     private async Task<string?> Ref(string branch)
     {
-        var reference = await Call("git/ref/heads/" + branch, allowMissing: true);
+        var reference = await Call("git/ref/heads/" + string.Join("/", branch.Split('/').Select(Uri.EscapeDataString)), allowMissing: true);
         if (reference is null) return null;
         if ((string?)reference["ref"] != "refs/heads/" + branch || (string?)reference["object"]?["type"] != "commit")
             throw new CommandConflict("Unexpected Git reference.");

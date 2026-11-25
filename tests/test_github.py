@@ -137,6 +137,57 @@ class GitHubTest(unittest.TestCase):
             self.assertIn("Kept "+branch,app.get(task)["history"][-1]["text"])
         self.assertNotIn("delete-ref",gh.writes)
 
+    def test_confirmed_linked_branches_on_finish(self):
+        self.enable_issue_actions()
+        app, gh = self.controller, self.gh
+        task = self.ready()["id"]
+        receipt = self.poll()["draft"]
+        head = receipt["headSha"]
+        gh.pulls[-1].update(state="closed", merged=True)
+        route = "github/issues/1/actions"
+        preview = route + f"?taskId={task}&headSha={head}&finish=true"
+        cmd = {"taskId":task,"headSha":head,"baseSha":gh.base,"scope":""}
+        names = ["feature/linked", "protected", "fork", "unmerged", "unrelated", "open-base", "link-changed"]
+        for name in names:
+            gh.git("update-ref","refs/heads/"+name,head)
+        def link(i, name):
+            return {"number":30+i,"merged":name!="unmerged","headRefName":name,"headRefOid":head,
+                    "repository":{"nameWithOwner":gh.repo},"headRepository":{"nameWithOwner":"other/fork" if name=="fork" else gh.repo}}
+        gh.linked_pulls[1]=[link(i,n) for i,n in enumerate(names) if n!="unrelated"]
+        gh.protected.add("protected")
+        gh._pulls.append({"number":99,"state":"open","head":{"ref":"source"},"base":{"ref":"open-base"}})
+        if os.getenv("FACTORY_BROWSER_TEST") == "1":
+            subprocess.run(["node","browser-issue-actions.mjs",app.url,gh.base,"linked-preview"],cwd=test_slice.ROOT/"src/Factory.Web",
+                           timeout=60,check=True,env=dict(os.environ,FACTORY_LOCAL_TOKEN=app.token))
+        before=app.api(preview)
+        entries={x["target"]["branch"]:x["keep"] for x in before["branches"]}
+        self.assertIsNone(entries["feature/linked"])
+        self.assertIn("protect",entries["protected"])
+        self.assertIn("open PR",entries["open-base"])
+        self.assertTrue({"unmerged","unrelated","fork"}.isdisjoint(entries))
+        gh.git("update-ref","refs/heads/feature/linked",gh.base,head)
+        with self.assertRaises(HTTPError) as stale:
+            app.api(route+"/finish",{**cmd,"cleanupHash":before["cleanupHash"]})
+        self.assertEqual(stale.exception.code,409)
+        stale.exception.close()
+        self.assertFalse(gh.comments)
+        gh.git("update-ref","refs/heads/feature/linked",head,gh.base)
+        approved={**cmd,"cleanupHash":app.api(preview)["cleanupHash"]}
+        gh.drop_close=True
+        with self.assertRaises(HTTPError) as interrupted:
+            app.api(route+"/finish",approved)
+        interrupted.exception.close()
+        app.stop()
+        app.start(manual=True)
+        gh.linked_pulls[1]=[x for x in gh.linked_pulls[1] if x["headRefName"]!="link-changed"]
+        gh.linked_pulls[1].append(link(20,"unrelated"))
+        self.assertEqual(app.api(preview)["cleanupHash"],approved["cleanupHash"])
+        self.assertEqual(app.api(route+"/finish",approved)["stage"],"finished")
+        app.api(route+"/finish",approved)
+        refs=gh.git("for-each-ref","--format=%(refname:short)","refs/heads").splitlines()
+        self.assertEqual(set(refs),{"main",*names[1:]})
+        self.assertEqual(gh.writes.count("delete-ref"),2)
+
     def test_merged_followup_uses_approved_base(self):
         app, gh = self.controller, self.gh
         task = self.ready()

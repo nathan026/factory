@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import type { Api, IssueAction, Workspace } from "./types";
 
-type Preview = { summary: string; baseSha: string; path: string; paths?: string[]; criteria?: { id: string; text: string }[]; merged: boolean; open: boolean; targetBranch: string; state: IssueAction | null };
+type Preview = { cleanupHash?: string; branches?: {target:{branch:string; pull:number; headSha:string}; keep:string|null}[]; summary: string; baseSha: string; path: string; paths?: string[]; criteria?: { id: string; text: string }[]; merged: boolean; open: boolean; targetBranch: string; state: IssueAction | null };
 
 export function IssueActions({task, api, ready, update}: {task: Workspace; api: Api; ready: boolean; update: () => void}) {
   const repo = task.repository!;
@@ -16,7 +16,7 @@ export function IssueActions({task, api, ready, update}: {task: Workspace; api: 
   async function open(kind: "follow-up" | "finish") {
     setBusy(true); setError("");
     try {
-      const p = await api<Preview>(route+"?taskId="+task.id+"&headSha="+draft.headSha);
+      const p = await api<Preview>(route+"?taskId="+task.id+"&headSha="+draft.headSha+(kind==="finish" ? "&finish=true" : ""));
       setPreview(p); setForm(kind);
       if (p.state) setScope(p.state.scope);
     } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
@@ -26,7 +26,7 @@ export function IssueActions({task, api, ready, update}: {task: Workspace; api: 
     setBusy(true); setError("");
     try {
       await api(route+"/"+(withdraw ? "withdraw" : form), {body:{taskId:task.id,headSha:draft.headSha,baseSha:preview.state?.baseSha ?? preview.baseSha,
-        actionId:preview.state?.id, scope:form==="finish" ? "" : scope.trim()}});
+        actionId:preview.state?.id, cleanupHash:form==="finish" ? preview.cleanupHash ?? undefined : undefined, scope:form==="finish" ? "" : scope.trim()}});
       setForm(null); update();
     } catch (e) { setError((e as Error).message); update(); } finally { setBusy(false); }
   }
@@ -50,7 +50,10 @@ export function IssueActions({task, api, ready, update}: {task: Workspace; api: 
           : <p>The base has changed. This round starts from the displayed base. Include any work you still need from the earlier PR in your request.</p>)}
       </> : <>
         <p>The factory will post a work summary on issue #{repo.number} and close the issue.
-          It will remove merged factory branches that still match their recorded revisions.</p>
+        </p>
+        {preview.branches && (preview.branches.length ? <ul aria-label="Branch cleanup">{preview.branches.map(({target,keep})=>
+          <li key={target.branch}>{keep ?? <>Delete <code>{target.branch}</code></>} (PR #{target.pull}, <code>{target.headSha.slice(0,12)}</code>)</li>)}</ul>
+          : <p>No eligible branches to delete.</p>)}
         <details><summary>Preview the public comment</summary><pre style={{whiteSpace:"pre-wrap"}}>{preview.summary}</pre></details>
         {!preview.merged && <p>Merge PR #{draft.number} before finishing this issue.</p>}
       </>}

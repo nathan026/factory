@@ -23,7 +23,13 @@ try {
     await form.getByText("Preview the public comment").click();
     assert.ok((await form.innerText()).includes("PR #20"));
     const close = form.getByRole("button", {name: "Post summary and close issue"});
-    if (mode === "finish") {
+    if (mode === "linked-preview") {
+      const cleanup=form.getByRole("list", {name:"Branch cleanup"});
+      await cleanup.getByText("feature/linked", {exact:true}).waitFor();
+      assert.match(await cleanup.innerText(), /protected.*GitHub protects/);
+      assert.ok(!(await cleanup.innerText()).includes("unrelated"));
+      await form.getByRole("button", {name:"Cancel"}).click();
+    } else if (mode === "finish") {
       await close.click();
       await page.getByRole("link", {name:"Read the final summary"}).waitFor();
     } else {
