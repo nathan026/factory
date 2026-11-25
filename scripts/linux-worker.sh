@@ -35,5 +35,79 @@ case "${1:-}" in
         shift
         exec python3 "$root/scripts/run_ci.py" "$@"
         ;;
-    *) echo 'Choose login, allowance, register, worker, dispatch or ci.' >&2; exit 2;;
+    usage)
+        if [ "$#" -ne 2 ]; then echo 'Usage: linux-worker.sh usage TASK_UUID' >&2; exit 2; fi
+        exec node --experimental-sqlite --input-type=commonjs - "$2" <<'NODE'
+const task = process.argv[2];
+if (task.length !== 36 || !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(task)) {
+    console.error('Expected a task UUID.');
+    process.exit(2);
+}
+
+const journal = process.env.FACTORY_LEASE_DB;
+if (!journal) {
+    console.error('Set FACTORY_LEASE_DB to the deployment lease journal path.');
+    process.exit(2);
+}
+
+const { DatabaseSync } = require('node:sqlite');
+const taskId = task.toLowerCase();
+const tokenKeys = ['input_tokens', 'cached_input_tokens', 'output_tokens'];
+const phases = new Map();
+try {
+    const db = new DatabaseSync(journal, { readOnly: true });
+    try {
+        const attempts = db.prepare('SELECT action, usage FROM codex_attempts WHERE task = ? ORDER BY action');
+        for (const { action, usage } of attempts.iterate(taskId)) {
+            if (!phases.has(action)) {
+                phases.set(action, tokenKeys.map(() => ({ sum: 0n, known: 0, missing: 0 })));
+            }
+            let counts;
+            try {
+                counts = JSON.parse(usage, (key, value, context) => {
+                    if (typeof value === 'number' && tokenKeys.includes(key)) {
+                        // Use the original integer literal before Number rounding.
+                        if (!/^-?(?:0|[1-9][0-9]{0,18})$/.test(context.source)) return null;
+                        const count = BigInt(context.source);
+                        return count >= 0n && count <= 9223372036854775807n ? count : null;
+                    }
+                    return value;
+                });
+            } catch { counts = null; }
+            phases.get(action).forEach((total, index) => {
+                const count = counts?.[tokenKeys[index]];
+                if (typeof count === 'bigint') {
+                    total.sum += count;
+                    total.known++;
+                } else {
+                    total.missing++;
+                }
+            });
+        }
+    } finally {
+        db.close();
+    }
+} catch {
+    console.error('Could not read the Codex attempts from the lease journal.');
+    process.exit(1);
+}
+
+function formatTokens({ sum, known, missing }) {
+    if (!known) return 'unknown';
+    return missing ? `${sum} known; ${missing} unknown` : String(sum);
+}
+
+console.log(`# Codex usage for task ${taskId}\n`);
+console.log('Funding mode: subscription. API billing is outside this journal.');
+console.log('The current journal records token counts. Executed model and attributable cost are unknown.\n');
+if (!phases.size) console.log('No subscription attempts recorded for this task.\n');
+console.log('| Phase | Input tokens | Cached input tokens | Output tokens | Executed model | Attributable cost |');
+console.log('| --- | ---: | ---: | ---: | --- | --- |');
+for (const [action, totals] of phases) {
+    const phase = typeof action === 'string' && action && !/[^A-Za-z0-9_-]/.test(action) ? action : 'unknown';
+    console.log(`| ${phase} | ${totals.map(formatTokens).join(' | ')} | unknown | unknown |`);
+}
+NODE
+        ;;
+    *) echo 'Choose login, allowance, register, worker, dispatch, ci or usage TASK_UUID.' >&2; exit 2;;
 esac
